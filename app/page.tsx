@@ -36,6 +36,8 @@ export default function Home() {
           <ol className="list-decimal list-inside text-sm text-gray-600 space-y-1">
             <li>Upload a base image and sub-images in the Editor</li>
             <li>Drag sub-images to position them on the base image</li>
+            <li>Use keyboard arrows or input fields for precise positioning</li>
+            <li>Set center points for rotation (optional)</li>
             <li>Copy the generated coordinates JSON</li>
             <li>Paste coordinates in the Showcase page to display</li>
           </ol>
