@@ -12,7 +12,7 @@ export default function Home() {
         </p>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Link href="/editor">
+          <Link href="/layout-editor">
             <div className="bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl p-8 cursor-pointer transition-all transform hover:scale-105 shadow-lg">
               <h2 className="text-2xl font-bold mb-3">Editor</h2>
               <p className="text-blue-100">
@@ -21,7 +21,7 @@ export default function Home() {
             </div>
           </Link>
           
-          <Link href="/showcase">
+          <Link href="/show">
             <div className="bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl p-8 cursor-pointer transition-all transform hover:scale-105 shadow-lg">
               <h2 className="text-2xl font-bold mb-3">Showcase</h2>
               <p className="text-purple-100">

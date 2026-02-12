@@ -182,6 +182,19 @@ export default function Editor() {
     URL.revokeObjectURL(url)
   }
 
+  useEffect(() => {
+  if (dragState.isDragging) {
+    const onMove = (e: MouseEvent) => handleMouseMove(e as any);
+    const onUp = () => handleMouseUp();
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }
+}, [dragState.isDragging]);
+
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
