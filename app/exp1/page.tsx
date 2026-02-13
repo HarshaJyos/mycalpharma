@@ -63,7 +63,7 @@ export default function Experiment() {
   const [observations, setObservations] = useState<ObservationRecord[]>([])
   const [autoScroll, setAutoScroll] = useState(true)
   const [currentGraphX, setCurrentGraphX] = useState(0)
-  const [maxResponse, setMaxResponse] = useState(100) // mm - will be calculated
+  const [maxResponse, setMaxResponse] = useState(100)
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
   const [showCompleteGraph, setShowCompleteGraph] = useState(false)
   
@@ -75,17 +75,11 @@ export default function Experiment() {
   const drawableAreaRefs = useRef<Record<string, HTMLDivElement>>({})
   const animationFrameRef = useRef<number>()
   
-  // Available baselines and concentrations
   const availableBaselines = [20, 50, 100, 200, 400]
   const availableConcentrations = [0.05, 0.1, 0.2, 0.4, 0.8]
-  
-  // Organ bath volume (typical value)
-  const organBathVolume = 20 // mL
-  
-  // Maximum rotation angle to prevent overflow - REDUCED for better fit
-  const MAX_ROTATION_ANGLE = 20 // degrees (reduced from 35 to make graphs flatter)
+  const organBathVolume = 20
+  const MAX_ROTATION_ANGLE = 20
 
-  // Toast auto-dismiss
   useEffect(() => {
     if (toast) {
       const timer = setTimeout(() => {
@@ -99,7 +93,6 @@ export default function Experiment() {
     setToast({ message, type })
   }
 
-  // Calculate scale based on canvas dimensions
   useEffect(() => {
     if (imageData.baseImageDimensions && canvasWrapperRef.current) {
       const wrapper = canvasWrapperRef.current
@@ -114,13 +107,11 @@ export default function Experiment() {
     }
   }, [imageData.baseImageDimensions])
 
-  // Initialize canvases with dynamic expansion capability
   useEffect(() => {
     imageData.drawableAreas?.forEach(area => {
       const canvas = canvasRefs.current[area.id]
       if (canvas && !contextRefs.current[area.id]) {
-        // Start with a large initial width that can hold many injections
-        const initialWidth = area.scrollWidth * 3 // Triple the initial size
+        const initialWidth = area.scrollWidth * 3
         canvas.width = initialWidth
         canvas.height = area.height
         const ctx = canvas.getContext('2d')
@@ -129,7 +120,6 @@ export default function Experiment() {
           ctx.fillStyle = area.color
           ctx.fillRect(0, 0, canvas.width, canvas.height)
           
-          // Draw grid lines
           ctx.strokeStyle = '#e0e0e0'
           ctx.lineWidth = 1
           
@@ -151,23 +141,18 @@ export default function Experiment() {
     })
   }, [imageData.drawableAreas])
   
-  // Function to expand canvas if needed
   const expandCanvasIfNeeded = useCallback((areaId: string, requiredWidth: number) => {
     const canvas = canvasRefs.current[areaId]
     const ctx = contextRefs.current[areaId]
     
     if (canvas && ctx && requiredWidth > canvas.width - 200) {
-      // Need to expand - save current content
       const currentImageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       
-      // Double the canvas width
       const newWidth = canvas.width * 2
       canvas.width = newWidth
       
-      // Restore old content
       ctx.putImageData(currentImageData, 0, 0)
       
-      // Redraw grid on new area
       const area = imageData.drawableAreas?.find(a => a.id === areaId)
       if (area) {
         ctx.fillStyle = area.color
@@ -284,29 +269,17 @@ export default function Experiment() {
     }
   }, [])
 
-  // Calculate response based on DRC formula
   const calculateResponse = (baseline: number, concentration: number): number => {
-    // Based on the reference image:
-    // Baseline 50: 0.05 (tiny), 0.1 (small), 0.2 (medium), 0.4 (large), 0.8 (largest)
-    // Baseline 100: 0.8 gives same height
-    // Baseline 200: 0.8 gives same height
-    // Baseline 400: 0.8 gives same height
+    const amountAdded = 1
+    const concInBath = (concentration * amountAdded) / organBathVolume
     
-    // The concentration in bath after adding 1ml to 20ml bath
-    const amountAdded = 1 // mL
-    const concInBath = (concentration * amountAdded) / organBathVolume // µg/mL
-    
-    // Use Hill equation with parameters tuned to match reference
-    // EC50 should be around 0.005-0.01 to get good spread
-    const EC50 = 0.008 // µg/mL in bath
+    const EC50 = 0.008
     const hillCoefficient = 1.5
     
-    // Hill equation
     const numerator = Math.pow(concInBath, hillCoefficient)
     const denominator = Math.pow(EC50, hillCoefficient) + Math.pow(concInBath, hillCoefficient)
     const responsePercent = 100 * (numerator / denominator)
     
-    // For debugging - see what we're calculating
     console.log('=== DOSE-RESPONSE CALCULATION ===')
     console.log('Stock concentration:', concentration, 'µg/mL')
     console.log('Baseline:', baseline, 'µg/mL')
@@ -343,14 +316,13 @@ export default function Experiment() {
 
     const startRotation = currentLeverRotation
     const targetRotation = 0
-    const duration = 1500 // 1.5 seconds
+    const duration = 1500
     const startTime = Date.now()
-    const fixedGraphX = currentGraphX // Fixed X position - no scrolling during wash
 
     console.log('=== WASH START ===')
     console.log('Current rotation:', startRotation.toFixed(2), '°')
 
-    // Get starting pen tip position
+    // FIXED: Calculate pen tip position correctly
     const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
     const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
     
@@ -362,7 +334,6 @@ export default function Experiment() {
       startRotation
     )
 
-    // Get baseline (0 rotation) pen tip position
     const baselinePenTip = rotatePoint(
       penTipLocalX,
       penTipLocalY,
@@ -376,7 +347,6 @@ export default function Experiment() {
       const elapsed = now - startTime
       const progress = Math.min(elapsed / duration, 1)
 
-      // Fast exponential return to baseline
       const easeProgress = 1 - Math.exp(-5 * progress)
 
       const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
@@ -390,7 +360,7 @@ export default function Experiment() {
       }))
 
       if (progress >= 1) {
-        // Draw final vertical line from start to baseline
+        // Draw final vertical line from current position back to baseline
         imageData.drawableAreas?.forEach(area => {
           if (
             startPenTip.x >= area.x &&
@@ -398,24 +368,51 @@ export default function Experiment() {
             startPenTip.y >= area.y &&
             startPenTip.y <= area.y + area.height
           ) {
-            const canvasX = fixedGraphX
-            const startY = startPenTip.y - area.y
-            const endY = baselinePenTip.y - area.y
+            // Get current scroll position
+            const currentScroll = drawableAreaRefs.current[area.id]?.scrollLeft / scale || 0
+            
+            // Use actual pen tip world coordinates + scroll offset
+            const startCanvasX = (startPenTip.x - area.x) + currentScroll
+            const startCanvasY = startPenTip.y - area.y
+            const endCanvasX = (baselinePenTip.x - area.x) + currentScroll
+            const endCanvasY = baselinePenTip.y - area.y
+
+            console.log('Wash line:', {
+              startCanvasX: startCanvasX.toFixed(1),
+              startCanvasY: startCanvasY.toFixed(1),
+              endCanvasX: endCanvasX.toFixed(1),
+              endCanvasY: endCanvasY.toFixed(1),
+              currentScroll: currentScroll.toFixed(1)
+            })
 
             const ctx = contextRefs.current[area.id]
             if (ctx) {
               ctx.strokeStyle = '#0000ff'
               ctx.lineWidth = 2
               ctx.beginPath()
-              ctx.moveTo(canvasX, startY)
-              ctx.lineTo(canvasX, endY)
+              ctx.moveTo(startCanvasX, startCanvasY)
+              ctx.lineTo(endCanvasX, endCanvasY)
               ctx.stroke()
             }
           }
         })
 
         setExperimentRunning(false)
-        setCurrentGraphX(fixedGraphX + 15) // Small spacing after wash
+        
+        // Update currentGraphX: During wash, scroll a small distance for the vertical line
+        const area = imageData.drawableAreas?.[0]
+        if (area && drawableAreaRefs.current[area.id]) {
+          // Add small scroll for the wash line spacing
+          const currentScroll = drawableAreaRefs.current[area.id].scrollLeft / scale
+          const newScroll = currentScroll + 15 // Small spacing after wash
+          const canvas = canvasRefs.current[area.id]
+          const visibleWidth = area.width
+          const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+          const clampedScroll = Math.max(0, Math.min(newScroll, maxScrollLeft))
+          
+          drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
+          setCurrentGraphX(clampedScroll)
+        }
         
         console.log('=== WASH COMPLETE ===')
         showToast('Wash completed', 'success')
@@ -447,7 +444,6 @@ export default function Experiment() {
     showToast(`Injecting ${selectedConcentration} µg/mL ACh on ${selectedBaseline} µg/mL baseline...`, 'info')
     setExperimentRunning(true)
 
-    // Calculate target response
     const responsePercent = calculateResponse(selectedBaseline, selectedConcentration)
     const targetRotation = -(responsePercent / 100) * MAX_ROTATION_ANGLE
 
@@ -458,20 +454,21 @@ export default function Experiment() {
     console.log('Target rotation:', targetRotation.toFixed(2), '°')
 
     const startRotation = currentLeverRotation
-    const duration = 3000 // 3 seconds for very smooth curve
+    const duration = 3000
     const startTime = Date.now()
-    const startGraphX = currentGraphX
-    const graphWidth = 100 // Reduced width for better fit
 
-    // Track last position per area - CRITICAL for continuous lines
+    // Track last position per area for continuous lines
     const areaLastPos: Record<string, { x: number; y: number }> = {}
+    
+    // For auto-scroll: track the starting scroll position
+    const startScrollPositions: Record<string, number> = {}
+    const scrollDistance = 150 // How far to scroll during the injection (simulate paper movement)
 
     const animate = () => {
       const now = Date.now()
       const elapsed = now - startTime
       const progress = Math.min(elapsed / duration, 1)
 
-      // Smooth sigmoid for biological response
       const easeProgress = 1 / (1 + Math.exp(-8 * (progress - 0.5)))
       
       const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
@@ -484,79 +481,97 @@ export default function Experiment() {
         )
       }))
 
-      // Calculate pen tip world position
-      // CRITICAL: penTipOffsetX and penTipOffsetY are RELATIVE to the image's top-left corner
-      // So the absolute pen tip position is: image.x + offset
-      const penTipAbsoluteX = leverImage.x + leverImage.penTipOffsetX
-      const penTipAbsoluteY = leverImage.y + leverImage.penTipOffsetY
+      // FIXED: Calculate pen tip position correctly (same as show page)
+      const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
+      const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
       
-      // Now rotate this absolute position around the pivot point
       const rotatedPenTip = rotatePoint(
-        penTipAbsoluteX,
-        penTipAbsoluteY,
+        penTipLocalX,
+        penTipLocalY,
         leverImage.centerX,
         leverImage.centerY,
         currentRotation
       )
 
-      console.log('Pen tip calc:', {
-        imageX: leverImage.x,
-        imageY: leverImage.y,
-        offsetX: leverImage.penTipOffsetX,
-        offsetY: leverImage.penTipOffsetY,
-        absoluteX: penTipAbsoluteX,
-        absoluteY: penTipAbsoluteY,
-        pivotX: leverImage.centerX,
-        pivotY: leverImage.centerY,
-        rotation: currentRotation.toFixed(2),
-        rotatedX: rotatedPenTip.x.toFixed(2),
-        rotatedY: rotatedPenTip.y.toFixed(2)
-      })
-
-      // X position moves linearly across the graph
-      const currentXOffset = startGraphX + (progress * graphWidth)
-
-      // Draw on canvas
+      // Draw on canvas - CRITICAL: Account for scroll position!
       imageData.drawableAreas?.forEach(area => {
-        // Check if we need to expand canvas
-        expandCanvasIfNeeded(area.id, currentXOffset + 300)
+        console.log('=== CHECKING DRAWABLE AREA ===')
+        console.log('Area bounds:', {
+          areaX: area.x,
+          areaY: area.y,
+          areaWidth: area.width,
+          areaHeight: area.height,
+          areaRight: area.x + area.width,
+          areaBottom: area.y + area.height
+        })
+        console.log('Pen tip position:', {
+          penTipX: rotatedPenTip.x.toFixed(1),
+          penTipY: rotatedPenTip.y.toFixed(1)
+        })
         
-        if (
-          rotatedPenTip.x >= area.x &&
+        // Check if pen tip is over this drawable area
+        const isInArea = rotatedPenTip.x >= area.x &&
           rotatedPenTip.x <= area.x + area.width &&
           rotatedPenTip.y >= area.y &&
           rotatedPenTip.y <= area.y + area.height
-        ) {
-          // X moves linearly
-          const currentXOffset = startGraphX + (progress * graphWidth)
           
-          // Auto-scroll: keep the current drawing position centered in visible area
+        console.log('Is pen in area?', isInArea)
+        
+        if (isInArea) {
+          console.log('✅ PEN IS IN AREA - DRAWING!')
+          
+          // Initialize start scroll position if not set
+          if (startScrollPositions[area.id] === undefined && drawableAreaRefs.current[area.id]) {
+            startScrollPositions[area.id] = drawableAreaRefs.current[area.id].scrollLeft / scale
+          }
+          
+          // AUTO-SCROLL: Simulate paper movement - scroll gradually during injection
+          const canvas = canvasRefs.current[area.id]
+          const startScroll = startScrollPositions[area.id] || 0
+          
+          // Scroll distance increases with progress
+          const currentScrollOffset = startScroll + (scrollDistance * progress)
+          
           if (autoScroll && drawableAreaRefs.current[area.id]) {
-            const canvas = canvasRefs.current[area.id]
             const visibleWidth = area.width
-            // Center the current drawing position in the viewport
-            const targetScrollLeft = currentXOffset - (visibleWidth / 2)
-            // Clamp to valid range
-            const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth  
-            const clampedScroll = Math.max(0, Math.min(targetScrollLeft, maxScrollLeft))
+            const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+            const clampedScroll = Math.max(0, Math.min(currentScrollOffset, maxScrollLeft))
+            
             drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
             
             console.log('Auto-scroll:', {
-              currentXOffset: currentXOffset.toFixed(2),
-              visibleWidth: visibleWidth.toFixed(2),
-              targetScroll: targetScrollLeft.toFixed(2),
-              actualScroll: clampedScroll.toFixed(2),
-              scale
+              progress: (progress * 100).toFixed(1) + '%',
+              startScroll: startScroll.toFixed(1),
+              currentOffset: currentScrollOffset.toFixed(1),
+              actualScroll: clampedScroll.toFixed(1)
             })
           }
-
-          const canvasX = currentXOffset
+          
+          // Check if we need to expand canvas
+          const penTipRelativeX = rotatedPenTip.x - area.x
+          expandCanvasIfNeeded(area.id, penTipRelativeX + currentScrollOffset + 300)
+          
+          // CRITICAL FIX: Canvas coordinates must account for the scroll offset!
+          // The pen tip appears to stay in one place on screen, but we're scrolling the canvas
+          // So we need to draw at: pen position + scroll offset
+          const canvasX = (rotatedPenTip.x - area.x) + currentScrollOffset
           const canvasY = rotatedPenTip.y - area.y
 
-          // CRITICAL: Always draw line from last position to create continuous curve
+          console.log('Drawing at pen tip:', {
+            progress: (progress * 100).toFixed(1) + '%',
+            penTipWorldX: rotatedPenTip.x.toFixed(1),
+            penTipWorldY: rotatedPenTip.y.toFixed(1),
+            penTipRelativeX: (rotatedPenTip.x - area.x).toFixed(1),
+            scrollOffset: currentScrollOffset.toFixed(1),
+            canvasX: canvasX.toFixed(1),
+            canvasY: canvasY.toFixed(1),
+            rotation: currentRotation.toFixed(1) + '°'
+          })
+
+          // Always draw line from last position to create continuous curve
           const lastPos = areaLastPos[area.id]
           if (lastPos) {
-            // Draw line segment
+            console.log('Drawing line from', lastPos, 'to', { x: canvasX, y: canvasY })
             const ctx = contextRefs.current[area.id]
             if (ctx) {
               ctx.strokeStyle = '#ff0000'
@@ -567,11 +582,18 @@ export default function Experiment() {
               ctx.moveTo(lastPos.x, lastPos.y)
               ctx.lineTo(canvasX, canvasY)
               ctx.stroke()
+              console.log('✅ LINE DRAWN!')
+            } else {
+              console.log('❌ NO CONTEXT!')
             }
+          } else {
+            console.log('⚠️ NO LAST POSITION - FIRST FRAME')
           }
 
           // Update last position for next frame
           areaLastPos[area.id] = { x: canvasX, y: canvasY }
+        } else {
+          console.log('❌ PEN IS OUTSIDE AREA - NO DRAWING')
         }
       })
 
@@ -579,7 +601,28 @@ export default function Experiment() {
         animationFrameRef.current = requestAnimationFrame(animate)
       } else {
         setExperimentRunning(false)
-        setCurrentGraphX(startGraphX + graphWidth)
+        
+        // Update currentGraphX to the furthest right position the pen reached
+        const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
+        if (leverImage && leverImage.penTipOffsetX !== undefined && leverImage.penTipOffsetY !== undefined) {
+          const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
+          const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
+          
+          const finalPenTip = rotatePoint(
+            penTipLocalX,
+            penTipLocalY,
+            leverImage.centerX!,
+            leverImage.centerY!,
+            currentRotation
+          )
+          
+          const area = imageData.drawableAreas?.[0]
+          if (area) {
+            // Record where we ended for the next operation
+            const finalScrollPos = drawableAreaRefs.current[area.id]?.scrollLeft / scale || 0
+            setCurrentGraphX(finalScrollPos + 20) // Add spacing for next injection
+          }
+        }
         
         const amountAdded = 1
         const concInBath = (selectedConcentration * amountAdded) / organBathVolume
@@ -608,22 +651,18 @@ export default function Experiment() {
       const updated = [...prev]
       updated[index].response = response
       
-      // Calculate percent response
       if (response && !isNaN(parseFloat(response))) {
         const responseValue = parseFloat(response)
         
-        // Find max response from all entries
         const allResponses = updated
           .map(obs => obs.response ? parseFloat(obs.response) : 0)
           .filter(r => r > 0)
         
         const currentMax = Math.max(...allResponses, responseValue)
         
-        // Calculate percentage
         const percent = ((responseValue / currentMax) * 100).toFixed(2)
         updated[index].percentResponse = percent
         
-        // Recalculate all percentages based on new max
         updated.forEach((obs, i) => {
           if (obs.response && !isNaN(parseFloat(obs.response))) {
             const obsResponse = parseFloat(obs.response)
@@ -641,7 +680,6 @@ export default function Experiment() {
     setCurrentGraphX(0)
     setObservations([])
     
-    // Reset lever rotation
     setImageData(prev => ({
       ...prev,
       subImages: prev.subImages.map(img =>
@@ -649,14 +687,12 @@ export default function Experiment() {
       )
     }))
 
-    // Clear all canvases
     imageData.drawableAreas?.forEach(area => {
       const ctx = contextRefs.current[area.id]
       if (ctx) {
         ctx.fillStyle = area.color
         ctx.fillRect(0, 0, area.scrollWidth, area.height)
         
-        // Redraw grid
         ctx.strokeStyle = '#e0e0e0'
         ctx.lineWidth = 1
         for (let x = 0; x < area.scrollWidth; x += 50) {
@@ -934,28 +970,99 @@ export default function Experiment() {
                         }
                         
                         return (
-                          <div
-                            key={img.id}
-                            className="absolute pointer-events-none transition-transform duration-100"
-                            style={{
-                              left: `${img.x * scale}px`,
-                              top: `${img.y * scale}px`,
-                              width: `${img.width * scale}px`,
-                              height: `${img.height * scale}px`,
-                              transform: `rotate(${rotation}deg)`,
-                              transformOrigin: transformOrigin,
-                              zIndex: img.zIndex,
-                            }}
-                          >
-                            <img
-                              src={img.url}
-                              alt=""
-                              className="pointer-events-none"
+                          <div key={img.id}>
+                            <div
+                              className="absolute pointer-events-none transition-transform duration-100"
                               style={{
+                                left: `${img.x * scale}px`,
+                                top: `${img.y * scale}px`,
                                 width: `${img.width * scale}px`,
                                 height: `${img.height * scale}px`,
+                                transform: `rotate(${rotation}deg)`,
+                                transformOrigin: transformOrigin,
+                                zIndex: img.zIndex,
                               }}
-                            />
+                            >
+                              <img
+                                src={img.url}
+                                alt=""
+                                className="pointer-events-none"
+                                style={{
+                                  width: `${img.width * scale}px`,
+                                  height: `${img.height * scale}px`,
+                                }}
+                              />
+                            </div>
+                            
+                            {/* Show pivot point (red dot) */}
+                            {hasCenterPoint && (
+                              <div
+                                className="absolute w-3 h-3 bg-red-500 rounded-full border-2 border-white pointer-events-none"
+                                style={{
+                                  left: `${img.centerX * scale - 6}px`,
+                                  top: `${img.centerY * scale - 6}px`,
+                                  zIndex: 9999,
+                                }}
+                              />
+                            )}
+                            
+                            {/* Show pen tip (green dot) - This is where drawing SHOULD happen */}
+                            {hasCenterPoint && img.penTipOffsetX !== undefined && img.penTipOffsetY !== undefined && (() => {
+                              // Calculate rotated pen tip position
+                              const penTipLocalX = img.x + img.penTipOffsetX
+                              const penTipLocalY = img.y + img.penTipOffsetY
+                              
+                              const rotatedPenTip = rotatePoint(
+                                penTipLocalX,
+                                penTipLocalY,
+                                img.centerX!,
+                                img.centerY!,
+                                rotation
+                              )
+                              
+                              return (
+                                <div
+                                  className="absolute w-4 h-4 bg-green-500 rounded-full border-2 border-white pointer-events-none"
+                                  style={{
+                                    left: `${rotatedPenTip.x * scale - 8}px`,
+                                    top: `${rotatedPenTip.y * scale - 8}px`,
+                                    zIndex: 10000,
+                                  }}
+                                  title={`Pen tip world: (${rotatedPenTip.x.toFixed(1)}, ${rotatedPenTip.y.toFixed(1)})`}
+                                />
+                              )
+                            })()}
+                            
+                            {/* DEBUG: Show where canvas drawing happens (yellow dot) */}
+                            {hasCenterPoint && img.penTipOffsetX !== undefined && img.penTipOffsetY !== undefined && (() => {
+                              const penTipLocalX = img.x + img.penTipOffsetX
+                              const penTipLocalY = img.y + img.penTipOffsetY
+                              
+                              const rotatedPenTip = rotatePoint(
+                                penTipLocalX,
+                                penTipLocalY,
+                                img.centerX!,
+                                img.centerY!,
+                                rotation
+                              )
+                              
+                              // Canvas now draws at the EXACT same world position as the pen tip
+                              // So yellow dot should overlap with green dot
+                              const canvasDrawX = rotatedPenTip.x
+                              const canvasDrawY = rotatedPenTip.y
+                              
+                              return (
+                                <div
+                                  className="absolute w-6 h-6 bg-yellow-400 rounded-full border-2 border-black pointer-events-none opacity-75"
+                                  style={{
+                                    left: `${canvasDrawX * scale - 12}px`,
+                                    top: `${canvasDrawY * scale - 12}px`,
+                                    zIndex: 9998, // Behind green dot
+                                  }}
+                                  title={`Canvas draws here: (${canvasDrawX.toFixed(1)}, ${canvasDrawY.toFixed(1)})`}
+                                />
+                              )
+                            })()}
                           </div>
                         )
                       } else {
@@ -1072,9 +1179,8 @@ export default function Experiment() {
                     const canvas = canvasRefs.current[area.id]
                     if (!canvas) return null
 
-                    // Calculate the actual used width (currentGraphX + some padding)
                     const usedWidth = Math.max(currentGraphX + 100, area.scrollWidth)
-                    const displayScale = 0.8 // Slightly smaller for overview
+                    const displayScale = 0.8
 
                     return (
                       <div key={area.id} className="mb-4">
@@ -1082,7 +1188,6 @@ export default function Experiment() {
                           <canvas
                             ref={(el) => {
                               if (el && canvas) {
-                                // Copy the original canvas content to this display canvas
                                 el.width = canvas.width
                                 el.height = canvas.height
                                 const ctx = el.getContext('2d')
