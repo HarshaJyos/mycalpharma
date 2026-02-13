@@ -12,6 +12,8 @@ interface SubImage {
   height: number
   centerX?: number
   centerY?: number
+  penTipOffsetX?: number  // Offset from image top-left
+  penTipOffsetY?: number  // Offset from image top-left
   zIndex: number
 }
 
@@ -21,7 +23,7 @@ interface DrawableArea {
   y: number
   width: number
   height: number
-  scrollWidth: number // Total scrollable width
+  scrollWidth: number
   zIndex: number
   color: string
 }
@@ -54,6 +56,7 @@ export default function Editor() {
     offsetY: 0,
   })
   const [settingCenter, setSettingCenter] = useState(false)
+  const [settingPenTip, setSettingPenTip] = useState(false)
   const [creatingArea, setCreatingArea] = useState(false)
   const [areaStart, setAreaStart] = useState<{ x: number; y: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -244,7 +247,7 @@ export default function Editor() {
           y,
           width,
           height,
-          scrollWidth: width * 3, // Default 3x scrollable width
+          scrollWidth: width * 3,
           zIndex: maxZ + 1,
           color: '#ffffff',
         }
@@ -292,7 +295,7 @@ export default function Editor() {
         startX: e.clientX,
         startY: e.clientY,
         offsetX: (e.clientX - containerRect.left) / scale - area.x,
-        offsetY: (e.clientX - containerRect.top) / scale - area.y,
+        offsetY: (e.clientY - containerRect.top) / scale - area.y,
       })
     }
   }
@@ -352,22 +355,40 @@ export default function Editor() {
   }
 
   const handleCanvasClick = (e: React.MouseEvent) => {
-    if (!settingCenter || !selectedImage || !containerRef.current) return
+    if (!containerRef.current || !selectedImage) return
 
     const containerRect = containerRef.current.getBoundingClientRect()
-    const centerX = (e.clientX - containerRect.left) / scale
-    const centerY = (e.clientY - containerRect.top) / scale
+    const clickX = (e.clientX - containerRect.left) / scale
+    const clickY = (e.clientY - containerRect.top) / scale
 
-    setSubImages(prev =>
-      prev.map(image =>
-        image.id === selectedImage
-          ? { ...image, centerX, centerY }
-          : image
+    const img = subImages.find(i => i.id === selectedImage)
+    if (!img) return
+
+    if (settingCenter) {
+      setSubImages(prev =>
+        prev.map(image =>
+          image.id === selectedImage
+            ? { ...image, centerX: clickX, centerY: clickY }
+            : image
+        )
       )
-    )
-    
-    setSettingCenter(false)
-    alert('Center point set!')
+      setSettingCenter(false)
+      alert('Center point (pivot) set!')
+    } else if (settingPenTip) {
+      // Store as offset from image position
+      const offsetX = clickX - img.x
+      const offsetY = clickY - img.y
+      
+      setSubImages(prev =>
+        prev.map(image =>
+          image.id === selectedImage
+            ? { ...image, penTipOffsetX: offsetX, penTipOffsetY: offsetY }
+            : image
+        )
+      )
+      setSettingPenTip(false)
+      alert('Pen tip set!')
+    }
   }
 
   const removeSubImage = (id: string) => {
@@ -380,7 +401,7 @@ export default function Editor() {
     if (selectedArea === id) setSelectedArea(null)
   }
 
-  const updateImageCoordinates = (id: string, field: 'x' | 'y' | 'centerX' | 'centerY', value: number) => {
+  const updateImageCoordinates = (id: string, field: 'x' | 'y' | 'centerX' | 'centerY' | 'penTipOffsetX' | 'penTipOffsetY', value: number) => {
     setSubImages(prev =>
       prev.map(img =>
         img.id === id ? { ...img, [field]: value } : img
@@ -445,6 +466,8 @@ export default function Editor() {
         height: img.height,
         centerX: img.centerX !== undefined ? Math.round(img.centerX) : undefined,
         centerY: img.centerY !== undefined ? Math.round(img.centerY) : undefined,
+        penTipOffsetX: img.penTipOffsetX !== undefined ? Math.round(img.penTipOffsetX) : undefined,
+        penTipOffsetY: img.penTipOffsetY !== undefined ? Math.round(img.penTipOffsetY) : undefined,
         zIndex: img.zIndex,
       })),
       drawableAreas: drawableAreas.map(area => ({
@@ -481,7 +504,6 @@ export default function Editor() {
   const selectedImg = subImages.find(img => img.id === selectedImage)
   const selectedAreaObj = drawableAreas.find(a => a.id === selectedArea)
 
-  // Sort all items by zIndex for rendering
   const allItems = [
     ...subImages.map(img => ({ ...img, type: 'image' as const })),
     ...drawableAreas.map(area => ({ ...area, type: 'area' as const }))
@@ -587,6 +609,9 @@ export default function Editor() {
                             <div className="text-gray-500">
                               {(item as SubImage).width} × {(item as SubImage).height} px
                             </div>
+                            {(item as SubImage).penTipOffsetX !== undefined && (
+                              <div className="text-green-600 text-xs">✓ Pen tip</div>
+                            )}
                           </div>
                         </>
                       ) : (
@@ -675,13 +700,13 @@ export default function Editor() {
                     style={{ 
                       width: `${baseImageDimensions.width * scale}px`,
                       height: `${baseImageDimensions.height * scale}px`,
-                      cursor: settingCenter ? 'crosshair' : creatingArea ? 'crosshair' : 'default'
+                      cursor: settingCenter || settingPenTip ? 'crosshair' : creatingArea ? 'crosshair' : 'default'
                     }}
                     onMouseMove={handleMouseMove}
                     onMouseUp={creatingArea ? handleCanvasMouseUp : handleMouseUp}
                     onMouseLeave={handleMouseUp}
                     onMouseDown={creatingArea ? handleCanvasMouseDown : undefined}
-                    onClick={settingCenter && !creatingArea ? handleCanvasClick : undefined}
+                    onClick={(settingCenter || settingPenTip) && !creatingArea ? handleCanvasClick : undefined}
                   >
                     <img
                       src={baseImage}
@@ -694,14 +719,13 @@ export default function Editor() {
                       draggable={false}
                     />
                     
-                    {/* Render all items in z-index order */}
                     {allItems.map(item => {
                       if (item.type === 'image') {
                         const img = item as SubImage
                         return (
                           <div key={img.id}>
                             <div
-                              className={`absolute ${settingCenter || creatingArea ? 'pointer-events-none' : 'cursor-move'} ${
+                              className={`absolute ${settingCenter || settingPenTip || creatingArea ? 'pointer-events-none' : 'cursor-move'} ${
                                 selectedImage === img.id ? 'ring-4 ring-blue-500' : 'ring-2 ring-white'
                               }`}
                               style={{
@@ -711,8 +735,8 @@ export default function Editor() {
                                 height: `${img.height * scale}px`,
                                 zIndex: img.zIndex,
                               }}
-                              onMouseDown={settingCenter || creatingArea ? undefined : (e) => handleMouseDown(e, img.id)}
-                              onClick={settingCenter || creatingArea ? undefined : () => {
+                              onMouseDown={settingCenter || settingPenTip || creatingArea ? undefined : (e) => handleMouseDown(e, img.id)}
+                              onClick={settingCenter || settingPenTip || creatingArea ? undefined : () => {
                                 setSelectedImage(img.id)
                                 setSelectedArea(null)
                               }}
@@ -739,6 +763,17 @@ export default function Editor() {
                                 }}
                               />
                             )}
+                            
+                            {img.penTipOffsetX !== undefined && img.penTipOffsetY !== undefined && (
+                              <div
+                                className="absolute w-4 h-4 bg-green-500 rounded-full border-2 border-white pointer-events-none"
+                                style={{
+                                  left: `${(img.x + img.penTipOffsetX) * scale - 8}px`,
+                                  top: `${(img.y + img.penTipOffsetY) * scale - 8}px`,
+                                  zIndex: img.zIndex + 1001,
+                                }}
+                              />
+                            )}
                           </div>
                         )
                       } else {
@@ -746,7 +781,7 @@ export default function Editor() {
                         return (
                           <div
                             key={area.id}
-                            className={`absolute overflow-hidden ${settingCenter || creatingArea ? 'pointer-events-none' : 'cursor-move'} ${
+                            className={`absolute overflow-hidden ${settingCenter || settingPenTip || creatingArea ? 'pointer-events-none' : 'cursor-move'} ${
                               selectedArea === area.id ? 'ring-4 ring-indigo-500' : 'ring-2 ring-gray-400'
                             }`}
                             style={{
@@ -757,8 +792,8 @@ export default function Editor() {
                               backgroundColor: area.color,
                               zIndex: area.zIndex,
                             }}
-                            onMouseDown={settingCenter || creatingArea ? undefined : (e) => handleMouseDown(e, undefined, area.id)}
-                            onClick={settingCenter || creatingArea ? undefined : () => {
+                            onMouseDown={settingCenter || settingPenTip || creatingArea ? undefined : (e) => handleMouseDown(e, undefined, area.id)}
+                            onClick={settingCenter || settingPenTip || creatingArea ? undefined : () => {
                               setSelectedArea(area.id)
                               setSelectedImage(null)
                             }}
@@ -771,7 +806,6 @@ export default function Editor() {
                       }
                     })}
                     
-                    {/* Area creation preview */}
                     {creatingArea && areaStart && (
                       <div
                         className="absolute border-2 border-dashed border-indigo-500 bg-indigo-100 bg-opacity-30 pointer-events-none"
@@ -786,28 +820,51 @@ export default function Editor() {
               )}
             </div>
 
-            {/* Image Controls */}
             {selectedImg && (
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-semibold text-gray-700">
                     Image Controls
                   </h2>
-                  <button
-                    onClick={() => setSettingCenter(!settingCenter)}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      settingCenter
-                        ? 'bg-red-600 text-white hover:bg-red-700'
-                        : 'bg-orange-600 text-white hover:bg-orange-700'
-                    }`}
-                  >
-                    {settingCenter ? 'Cancel Set Center' : 'Set Center Point'}
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setSettingCenter(!settingCenter)
+                        setSettingPenTip(false)
+                      }}
+                      className={`px-4 py-2 rounded-lg transition ${
+                        settingCenter
+                          ? 'bg-red-600 text-white hover:bg-red-700'
+                          : 'bg-orange-600 text-white hover:bg-orange-700'
+                      }`}
+                    >
+                      {settingCenter ? 'Cancel' : 'Set Pivot'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSettingPenTip(!settingPenTip)
+                        setSettingCenter(false)
+                      }}
+                      className={`px-4 py-2 rounded-lg transition ${
+                        settingPenTip
+                          ? 'bg-red-600 text-white hover:bg-red-700'
+                          : 'bg-green-600 text-white hover:bg-green-700'
+                      }`}
+                    >
+                      {settingPenTip ? 'Cancel' : 'Set Pen Tip'}
+                    </button>
+                  </div>
                 </div>
 
                 {settingCenter && (
                   <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
-                    <strong>Setting Center Mode:</strong> Click anywhere on the canvas to set the center point for rotation.
+                    <strong>Setting Pivot Mode:</strong> Click on canvas to set the center point. Image will rotate around this point and be locked to it in showcase.
+                  </div>
+                )}
+
+                {settingPenTip && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+                    <strong>Setting Pen Tip Mode:</strong> Click on canvas to set the pen tip. This point will draw when you rotate the image in showcase.
                   </div>
                 )}
 
@@ -838,7 +895,7 @@ export default function Editor() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Center X (px)
+                      Pivot X (px)
                     </label>
                     <input
                       type="number"
@@ -851,7 +908,7 @@ export default function Editor() {
                   
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Center Y (px)
+                      Pivot Y (px)
                     </label>
                     <input
                       type="number"
@@ -859,6 +916,32 @@ export default function Editor() {
                       onChange={(e) => updateImageCoordinates(selectedImg.id, 'centerY', Number(e.target.value))}
                       placeholder="Not set"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Pen Tip Offset X (px)
+                    </label>
+                    <input
+                      type="number"
+                      value={selectedImg.penTipOffsetX !== undefined ? Math.round(selectedImg.penTipOffsetX) : ''}
+                      onChange={(e) => updateImageCoordinates(selectedImg.id, 'penTipOffsetX', Number(e.target.value))}
+                      placeholder="Not set"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Pen Tip Offset Y (px)
+                    </label>
+                    <input
+                      type="number"
+                      value={selectedImg.penTipOffsetY !== undefined ? Math.round(selectedImg.penTipOffsetY) : ''}
+                      onChange={(e) => updateImageCoordinates(selectedImg.id, 'penTipOffsetY', Number(e.target.value))}
+                      placeholder="Not set"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
                     />
                   </div>
                 </div>
@@ -870,10 +953,17 @@ export default function Editor() {
                     <li>• Shift + Arrow keys: Move 10px</li>
                   </ul>
                 </div>
+                
+                <div className="mt-4 p-3 bg-purple-50 rounded-lg text-sm text-gray-700">
+                  <strong>Markers:</strong>
+                  <ul className="mt-2 space-y-1">
+                    <li>• 🔴 Red dot = Pivot point (image locks here in showcase)</li>
+                    <li>• 🟢 Green dot = Pen tip (draws when image rotates)</li>
+                  </ul>
+                </div>
               </div>
             )}
 
-            {/* Area Controls */}
             {selectedAreaObj && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h2 className="text-xl font-semibold text-gray-700 mb-4">
@@ -955,7 +1045,7 @@ export default function Editor() {
                 </div>
 
                 <div className="mt-4 p-3 bg-indigo-50 rounded-lg text-sm text-gray-700">
-                  <strong>Info:</strong> This area will be scrollable horizontally in the showcase page. Objects moving over it will draw on the canvas.
+                  <strong>Info:</strong> This area will be scrollable horizontally in the showcase page. Objects with pen tips will draw when rotated over it.
                 </div>
               </div>
             )}

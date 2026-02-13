@@ -12,6 +12,8 @@ interface SubImage {
   height: number
   centerX?: number
   centerY?: number
+  penTipOffsetX?: number
+  penTipOffsetY?: number
   rotation?: number
   zIndex: number
 }
@@ -27,27 +29,11 @@ interface DrawableArea {
   color: string
 }
 
-interface DrawingPath {
-  areaId: string
-  points: { x: number; y: number }[]
-  color: string
-  width: number
-}
-
 interface ImageData {
   baseImage: string | null
   baseImageDimensions?: { width: number; height: number }
   subImages: SubImage[]
   drawableAreas?: DrawableArea[]
-}
-
-interface DragState {
-  isDragging: boolean
-  imageId: string | null
-  startX: number
-  startY: number
-  initialImageX: number
-  initialImageY: number
 }
 
 export default function Showcase() {
@@ -61,16 +47,9 @@ export default function Showcase() {
   const [scale, setScale] = useState(1)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [settingCenter, setSettingCenter] = useState(false)
+  const [settingPenTip, setSettingPenTip] = useState(false)
   const [areaScrollPositions, setAreaScrollPositions] = useState<Record<string, number>>({})
-  const [drawings, setDrawings] = useState<DrawingPath[]>([])
-  const [dragState, setDragState] = useState<DragState>({
-    isDragging: false,
-    imageId: null,
-    startX: 0,
-    startY: 0,
-    initialImageX: 0,
-    initialImageY: 0,
-  })
+  const [rotatingImage, setRotatingImage] = useState<string | null>(null)
   const [penColor, setPenColor] = useState('#000000')
   const [penWidth, setPenWidth] = useState(2)
   const [isDrawingMode, setIsDrawingMode] = useState(true)
@@ -79,6 +58,10 @@ export default function Showcase() {
   const canvasWrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRefs = useRef<Record<string, HTMLCanvasElement>>({})
+  const contextRefs = useRef<Record<string, CanvasRenderingContext2D>>({})
+  const lastDrawnPositions = useRef<Record<string, { x: number; y: number }>>({})
+  const rotationStartAngle = useRef<number>(0)
+  const rotationStartMouseAngle = useRef<number>(0)
 
   useEffect(() => {
     if (imageData.baseImageDimensions && canvasWrapperRef.current) {
@@ -98,40 +81,18 @@ export default function Showcase() {
   useEffect(() => {
     imageData.drawableAreas?.forEach(area => {
       const canvas = canvasRefs.current[area.id]
-      if (canvas) {
+      if (canvas && !contextRefs.current[area.id]) {
         canvas.width = area.scrollWidth
         canvas.height = area.height
         const ctx = canvas.getContext('2d')
         if (ctx) {
+          contextRefs.current[area.id] = ctx
           ctx.fillStyle = area.color
           ctx.fillRect(0, 0, canvas.width, canvas.height)
         }
       }
     })
   }, [imageData.drawableAreas])
-
-  // Redraw all paths on canvases
-  useEffect(() => {
-    drawings.forEach(path => {
-      const canvas = canvasRefs.current[path.areaId]
-      if (canvas && path.points.length > 1) {
-        const ctx = canvas.getContext('2d')
-        if (ctx) {
-          ctx.strokeStyle = path.color
-          ctx.lineWidth = path.width
-          ctx.lineCap = 'round'
-          ctx.lineJoin = 'round'
-          
-          ctx.beginPath()
-          ctx.moveTo(path.points[0].x, path.points[0].y)
-          for (let i = 1; i < path.points.length; i++) {
-            ctx.lineTo(path.points[i].x, path.points[i].y)
-          }
-          ctx.stroke()
-        }
-      }
-    })
-  }, [drawings])
 
   const handleJSONInput = () => {
     try {
@@ -154,13 +115,14 @@ export default function Showcase() {
       
       setImageData(processedData)
       
-      // Initialize scroll positions
       const scrollPos: Record<string, number> = {}
       processedData.drawableAreas?.forEach((area: DrawableArea) => {
         scrollPos[area.id] = 0
       })
       setAreaScrollPositions(scrollPos)
-      setDrawings([])
+      
+      contextRefs.current = {}
+      lastDrawnPositions.current = {}
     } catch (err) {
       setError('Invalid JSON format. Please check your input.')
     }
@@ -191,13 +153,14 @@ export default function Showcase() {
           setJsonInput(JSON.stringify(data, null, 2))
           setError('')
           
-          // Initialize scroll positions
           const scrollPos: Record<string, number> = {}
           processedData.drawableAreas?.forEach((area: DrawableArea) => {
             scrollPos[area.id] = 0
           })
           setAreaScrollPositions(scrollPos)
-          setDrawings([])
+          
+          contextRefs.current = {}
+          lastDrawnPositions.current = {}
         } catch (err) {
           setError('Invalid JSON file. Please check the file format.')
         }
@@ -206,112 +169,137 @@ export default function Showcase() {
     }
   }
 
+  const drawOnCanvas = (areaId: string, x: number, y: number) => {
+    const ctx = contextRefs.current[areaId]
+    if (!ctx) return
+
+    const lastPos = lastDrawnPositions.current[areaId]
+    
+    ctx.strokeStyle = penColor
+    ctx.lineWidth = penWidth
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    if (lastPos) {
+      ctx.beginPath()
+      ctx.moveTo(lastPos.x, lastPos.y)
+      ctx.lineTo(x, y)
+      ctx.stroke()
+    } else {
+      ctx.beginPath()
+      ctx.arc(x, y, penWidth / 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    lastDrawnPositions.current[areaId] = { x, y }
+  }
+
+  const calculateAngle = (centerX: number, centerY: number, pointX: number, pointY: number) => {
+    return Math.atan2(pointY - centerY, pointX - centerX) * (180 / Math.PI)
+  }
+
+  const rotatePoint = (x: number, y: number, centerX: number, centerY: number, angle: number) => {
+    const radians = (angle * Math.PI) / 180
+    const cos = Math.cos(radians)
+    const sin = Math.sin(radians)
+    
+    const dx = x - centerX
+    const dy = y - centerY
+    
+    return {
+      x: centerX + (dx * cos - dy * sin),
+      y: centerY + (dx * sin + dy * cos)
+    }
+  }
+
   const handleImageMouseDown = (e: React.MouseEvent, imageId: string) => {
-    if (!containerRef.current || settingCenter) return
+    if (!containerRef.current || settingCenter || settingPenTip) return
     
     e.preventDefault()
     e.stopPropagation()
     
     const img = imageData.subImages.find(i => i.id === imageId)
-    if (!img) return
-    
-    const containerRect = containerRef.current.getBoundingClientRect()
+    if (!img || img.centerX === undefined || img.centerY === undefined) {
+      alert('Please set a pivot point for this image first!')
+      return
+    }
     
     setSelectedImage(imageId)
-    setDragState({
-      isDragging: true,
-      imageId,
-      startX: e.clientX,
-      startY: e.clientY,
-      initialImageX: img.x,
-      initialImageY: img.y,
-    })
+    setRotatingImage(imageId)
+    
+    const containerRect = containerRef.current.getBoundingClientRect()
+    const mouseX = (e.clientX - containerRect.left) / scale
+    const mouseY = (e.clientY - containerRect.top) / scale
+    
+    rotationStartAngle.current = img.rotation || 0
+    rotationStartMouseAngle.current = calculateAngle(img.centerX, img.centerY, mouseX, mouseY)
+    
+    if (isDrawingMode) {
+      lastDrawnPositions.current = {}
+    }
   }
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragState.isDragging || !dragState.imageId || !containerRef.current || !imageData.baseImageDimensions) return
+    if (!rotatingImage || !containerRef.current) return
+
+    const img = imageData.subImages.find(i => i.id === rotatingImage)
+    if (!img || img.centerX === undefined || img.centerY === undefined) return
 
     const containerRect = containerRef.current.getBoundingClientRect()
-    const img = imageData.subImages.find(i => i.id === dragState.imageId)
-    if (!img) return
-
-    const deltaX = (e.clientX - dragState.startX) / scale
-    const deltaY = (e.clientY - dragState.startY) / scale
-
-    let newX = dragState.initialImageX + deltaX
-    let newY = dragState.initialImageY + deltaY
-
-    newX = Math.max(0, Math.min(newX, imageData.baseImageDimensions.width - img.width))
-    newY = Math.max(0, Math.min(newY, imageData.baseImageDimensions.height - img.height))
-
-    // Update image position
+    const mouseX = (e.clientX - containerRect.left) / scale
+    const mouseY = (e.clientY - containerRect.top) / scale
+    
+    const currentMouseAngle = calculateAngle(img.centerX, img.centerY, mouseX, mouseY)
+    const angleDelta = currentMouseAngle - rotationStartMouseAngle.current
+    const newRotation = rotationStartAngle.current + angleDelta
+    
     setImageData(prev => ({
       ...prev,
       subImages: prev.subImages.map(image =>
-        image.id === dragState.imageId
-          ? { ...image, x: newX, y: newY }
+        image.id === rotatingImage
+          ? { ...image, rotation: newRotation }
           : image
       )
     }))
 
-    // Check if image tip is over any drawable area and draw
-    if (isDrawingMode && img.centerX !== undefined && img.centerY !== undefined) {
-      imageData.drawableAreas?.forEach(area => {
-        // Check if center point (tip) is within the area bounds
-        if (
-          img.centerX! >= area.x &&
-          img.centerX! <= area.x + area.width &&
-          img.centerY! >= area.y &&
-          img.centerY! <= area.y + area.height
-        ) {
-          // Calculate position within the scrollable canvas
-          const scrollOffset = areaScrollPositions[area.id] || 0
-          const localX = img.centerX! - area.x + scrollOffset
-          const localY = img.centerY! - area.y
+    // Draw if pen tip is set and drawing mode is on
+    if (isDrawingMode && img.penTipOffsetX !== undefined && img.penTipOffsetY !== undefined) {
+      // Calculate pen tip position after rotation
+      const penTipLocalX = img.x + img.penTipOffsetX
+      const penTipLocalY = img.y + img.penTipOffsetY
+      
+      const rotatedPenTip = rotatePoint(
+        penTipLocalX,
+        penTipLocalY,
+        img.centerX,
+        img.centerY,
+        newRotation
+      )
 
-          // Add point to current drawing path
-          setDrawings(prev => {
-            const lastPath = prev[prev.length - 1]
-            if (lastPath && lastPath.areaId === area.id) {
-              // Continue existing path
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...lastPath,
-                  points: [...lastPath.points, { x: localX, y: localY }]
-                }
-              ]
-            } else {
-              // Start new path
-              return [
-                ...prev,
-                {
-                  areaId: area.id,
-                  points: [{ x: localX, y: localY }],
-                  color: penColor,
-                  width: penWidth,
-                }
-              ]
-            }
-          })
+      imageData.drawableAreas?.forEach(area => {
+        if (
+          rotatedPenTip.x >= area.x &&
+          rotatedPenTip.x <= area.x + area.width &&
+          rotatedPenTip.y >= area.y &&
+          rotatedPenTip.y <= area.y + area.height
+        ) {
+          const scrollOffset = areaScrollPositions[area.id] || 0
+          const localX = rotatedPenTip.x - area.x + scrollOffset
+          const localY = rotatedPenTip.y - area.y
+
+          drawOnCanvas(area.id, localX, localY)
         }
       })
     }
   }
 
   const handleMouseUp = () => {
-    setDragState({
-      isDragging: false,
-      imageId: null,
-      startX: 0,
-      startY: 0,
-      initialImageX: 0,
-      initialImageY: 0,
-    })
+    setRotatingImage(null)
+    lastDrawnPositions.current = {}
   }
 
   useEffect(() => {
-    if (dragState.isDragging) {
+    if (rotatingImage) {
       const onMove = (e: MouseEvent) => handleMouseMove(e as any)
       const onUp = () => handleMouseUp()
       window.addEventListener('mousemove', onMove)
@@ -321,26 +309,44 @@ export default function Showcase() {
         window.removeEventListener('mouseup', onUp)
       }
     }
-  }, [dragState.isDragging, dragState, imageData, areaScrollPositions, isDrawingMode, penColor, penWidth])
+  }, [rotatingImage, imageData, areaScrollPositions, isDrawingMode, penColor, penWidth])
 
   const handleCanvasClick = (e: React.MouseEvent) => {
-    if (!settingCenter || !selectedImage || !containerRef.current) return
+    if (!containerRef.current) return
 
     const containerRect = containerRef.current.getBoundingClientRect()
-    const centerX = (e.clientX - containerRect.left) / scale
-    const centerY = (e.clientY - containerRect.top) / scale
+    const clickX = (e.clientX - containerRect.left) / scale
+    const clickY = (e.clientY - containerRect.top) / scale
 
-    setImageData(prev => ({
-      ...prev,
-      subImages: prev.subImages.map(img =>
-        img.id === selectedImage
-          ? { ...img, centerX, centerY }
-          : img
-      )
-    }))
-    
-    setSettingCenter(false)
-    alert('Center point set!')
+    if (settingCenter && selectedImage) {
+      setImageData(prev => ({
+        ...prev,
+        subImages: prev.subImages.map(img =>
+          img.id === selectedImage
+            ? { ...img, centerX: clickX, centerY: clickY }
+            : img
+        )
+      }))
+      setSettingCenter(false)
+      alert('Pivot point set!')
+    } else if (settingPenTip && selectedImage) {
+      const img = imageData.subImages.find(i => i.id === selectedImage)
+      if (img) {
+        const offsetX = clickX - img.x
+        const offsetY = clickY - img.y
+        
+        setImageData(prev => ({
+          ...prev,
+          subImages: prev.subImages.map(image =>
+            image.id === selectedImage
+              ? { ...image, penTipOffsetX: offsetX, penTipOffsetY: offsetY }
+              : image
+          )
+        }))
+      }
+      setSettingPenTip(false)
+      alert('Pen tip set!')
+    }
   }
 
   const updateRotation = (id: string, rotation: number) => {
@@ -361,6 +367,15 @@ export default function Showcase() {
     }))
   }
 
+  const updatePenTipOffset = (id: string, field: 'penTipOffsetX' | 'penTipOffsetY', value: number) => {
+    setImageData(prev => ({
+      ...prev,
+      subImages: prev.subImages.map(img =>
+        img.id === id ? { ...img, [field]: value } : img
+      )
+    }))
+  }
+
   const handleAreaScroll = (areaId: string, scrollLeft: number) => {
     setAreaScrollPositions(prev => ({
       ...prev,
@@ -370,30 +385,24 @@ export default function Showcase() {
 
   const clearDrawings = (areaId?: string) => {
     if (areaId) {
-      setDrawings(prev => prev.filter(p => p.areaId !== areaId))
-      const canvas = canvasRefs.current[areaId]
-      if (canvas) {
-        const area = imageData.drawableAreas?.find(a => a.id === areaId)
-        if (area) {
-          const ctx = canvas.getContext('2d')
-          if (ctx) {
-            ctx.fillStyle = area.color
-            ctx.fillRect(0, 0, canvas.width, canvas.height)
-          }
+      const area = imageData.drawableAreas?.find(a => a.id === areaId)
+      if (area) {
+        const ctx = contextRefs.current[areaId]
+        if (ctx) {
+          ctx.fillStyle = area.color
+          ctx.fillRect(0, 0, area.scrollWidth, area.height)
         }
       }
+      delete lastDrawnPositions.current[areaId]
     } else {
-      setDrawings([])
       imageData.drawableAreas?.forEach(area => {
-        const canvas = canvasRefs.current[area.id]
-        if (canvas) {
-          const ctx = canvas.getContext('2d')
-          if (ctx) {
-            ctx.fillStyle = area.color
-            ctx.fillRect(0, 0, canvas.width, canvas.height)
-          }
+        const ctx = contextRefs.current[area.id]
+        if (ctx) {
+          ctx.fillStyle = area.color
+          ctx.fillRect(0, 0, area.scrollWidth, area.height)
         }
       })
+      lastDrawnPositions.current = {}
     }
   }
 
@@ -402,13 +411,13 @@ export default function Showcase() {
     setJsonInput('')
     setError('')
     setSelectedImage(null)
-    setDrawings([])
     setAreaScrollPositions({})
+    contextRefs.current = {}
+    lastDrawnPositions.current = {}
   }
 
   const selectedImg = imageData.subImages.find(img => img.id === selectedImage)
 
-  // Sort all items by zIndex for rendering
   const allItems = [
     ...imageData.subImages.map(img => ({ ...img, type: 'image' as const })),
     ...(imageData.drawableAreas || []).map(area => ({ ...area, type: 'area' as const }))
@@ -554,9 +563,10 @@ export default function Showcase() {
                             Rotation: {Math.round(img.rotation || 0)}°
                           </div>
                           {img.centerX !== undefined && (
-                            <div className="text-green-600 text-xs">
-                              ✓ Center (pen tip)
-                            </div>
+                            <div className="text-red-600 text-xs">✓ Pivot set</div>
+                          )}
+                          {img.penTipOffsetX !== undefined && (
+                            <div className="text-green-600 text-xs">✓ Pen tip set</div>
                           )}
                         </div>
                       </div>
@@ -591,9 +601,9 @@ export default function Showcase() {
                     style={{
                       width: imageData.baseImageDimensions ? `${imageData.baseImageDimensions.width * scale}px` : 'auto',
                       height: imageData.baseImageDimensions ? `${imageData.baseImageDimensions.height * scale}px` : 'auto',
-                      cursor: settingCenter ? 'crosshair' : 'default'
+                      cursor: settingCenter || settingPenTip ? 'crosshair' : 'default'
                     }}
-                    onClick={settingCenter ? handleCanvasClick : undefined}
+                    onClick={(settingCenter || settingPenTip) ? handleCanvasClick : undefined}
                     onMouseMove={handleMouseMove}
                     onMouseUp={handleMouseUp}
                   >
@@ -607,7 +617,6 @@ export default function Showcase() {
                       } : {}}
                     />
                     
-                    {/* Render all items in z-index order */}
                     {allItems.map(item => {
                       if (item.type === 'image') {
                         const img = item as SubImage
@@ -615,29 +624,51 @@ export default function Showcase() {
                         const hasCenterPoint = img.centerX !== undefined && img.centerY !== undefined
                         
                         let transformOrigin = 'center'
+                        let imageLeft = img.x
+                        let imageTop = img.y
+                        
                         if (hasCenterPoint) {
                           const originX = ((img.centerX - img.x) / img.width) * 100
                           const originY = ((img.centerY - img.y) / img.height) * 100
                           transformOrigin = `${originX}% ${originY}%`
                         }
                         
+                        // Calculate pen tip position after rotation
+                        let penTipX = undefined
+                        let penTipY = undefined
+                        if (hasCenterPoint && img.penTipOffsetX !== undefined && img.penTipOffsetY !== undefined) {
+                          const penTipLocalX = img.x + img.penTipOffsetX
+                          const penTipLocalY = img.y + img.penTipOffsetY
+                          
+                          const rotatedPenTip = rotatePoint(
+                            penTipLocalX,
+                            penTipLocalY,
+                            img.centerX,
+                            img.centerY,
+                            rotation
+                          )
+                          
+                          penTipX = rotatedPenTip.x
+                          penTipY = rotatedPenTip.y
+                        }
+                        
                         return (
                           <div key={img.id}>
                             <div
-                              className={`absolute ${settingCenter && selectedImage === img.id ? 'pointer-events-none' : 'cursor-move'} ${
+                              className={`absolute ${settingCenter || settingPenTip ? 'pointer-events-none' : 'cursor-pointer'} ${
                                 selectedImage === img.id ? 'ring-4 ring-blue-500' : ''
                               }`}
                               style={{
-                                left: `${img.x * scale}px`,
-                                top: `${img.y * scale}px`,
+                                left: `${imageLeft * scale}px`,
+                                top: `${imageTop * scale}px`,
                                 width: `${img.width * scale}px`,
                                 height: `${img.height * scale}px`,
                                 transform: `rotate(${rotation}deg)`,
                                 transformOrigin: transformOrigin,
                                 zIndex: img.zIndex,
                               }}
-                              onMouseDown={(e) => !settingCenter && handleImageMouseDown(e, img.id)}
-                              onClick={() => !settingCenter && setSelectedImage(img.id)}
+                              onMouseDown={(e) => !(settingCenter || settingPenTip) && handleImageMouseDown(e, img.id)}
+                              onClick={() => !(settingCenter || settingPenTip) && setSelectedImage(img.id)}
                             >
                               <img
                                 src={img.url}
@@ -656,6 +687,16 @@ export default function Showcase() {
                                 style={{
                                   left: `${img.centerX * scale - 6}px`,
                                   top: `${img.centerY * scale - 6}px`,
+                                }}
+                              />
+                            )}
+                            
+                            {penTipX !== undefined && penTipY !== undefined && (
+                              <div
+                                className="absolute w-4 h-4 bg-green-500 rounded-full border-2 border-white pointer-events-none z-[9999]"
+                                style={{
+                                  left: `${penTipX * scale - 8}px`,
+                                  top: `${penTipY * scale - 8}px`,
                                 }}
                               />
                             )}
@@ -694,35 +735,58 @@ export default function Showcase() {
               )}
             </div>
 
-            {/* Rotation Controls */}
             {selectedImg && (
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-semibold text-gray-700">
-                    Rotation Controls
+                    Image Controls
                   </h2>
-                  <button
-                    onClick={() => setSettingCenter(!settingCenter)}
-                    className={`px-4 py-2 rounded-lg transition ${
-                      settingCenter
-                        ? 'bg-red-600 text-white hover:bg-red-700'
-                        : 'bg-orange-600 text-white hover:bg-orange-700'
-                    }`}
-                  >
-                    {settingCenter ? 'Cancel Set Center' : 'Set Center Point'}
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setSettingCenter(!settingCenter)
+                        setSettingPenTip(false)
+                      }}
+                      className={`px-4 py-2 rounded-lg transition ${
+                        settingCenter
+                          ? 'bg-red-600 text-white hover:bg-red-700'
+                          : 'bg-orange-600 text-white hover:bg-orange-700'
+                      }`}
+                    >
+                      {settingCenter ? 'Cancel' : 'Set Pivot'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSettingPenTip(!settingPenTip)
+                        setSettingCenter(false)
+                      }}
+                      className={`px-4 py-2 rounded-lg transition ${
+                        settingPenTip
+                          ? 'bg-red-600 text-white hover:bg-red-700'
+                          : 'bg-green-600 text-white hover:bg-green-700'
+                      }`}
+                    >
+                      {settingPenTip ? 'Cancel' : 'Set Pen Tip'}
+                    </button>
+                  </div>
                 </div>
 
                 {settingCenter && (
                   <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-800">
-                    <strong>Setting Center Mode:</strong> Click anywhere on the canvas to set the rotation center point for the selected image.
+                    <strong>Setting Pivot Mode:</strong> Click anywhere to set the pivot point. Image will rotate around this point and stay locked to it.
+                  </div>
+                )}
+
+                {settingPenTip && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+                    <strong>Setting Pen Tip Mode:</strong> Click anywhere to set the pen tip. This point will follow rotation and draw on areas.
                   </div>
                 )}
 
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Center X (px)
+                      Pivot X (px)
                     </label>
                     <input
                       type="number"
@@ -735,7 +799,7 @@ export default function Showcase() {
                   
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Center Y (px)
+                      Pivot Y (px)
                     </label>
                     <input
                       type="number"
@@ -743,6 +807,32 @@ export default function Showcase() {
                       onChange={(e) => updateCenterPoint(selectedImg.id, 'centerY', Number(e.target.value))}
                       placeholder="Not set"
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Pen Tip Offset X (px)
+                    </label>
+                    <input
+                      type="number"
+                      value={selectedImg.penTipOffsetX !== undefined ? Math.round(selectedImg.penTipOffsetX) : ''}
+                      onChange={(e) => updatePenTipOffset(selectedImg.id, 'penTipOffsetX', Number(e.target.value))}
+                      placeholder="Not set"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Pen Tip Offset Y (px)
+                    </label>
+                    <input
+                      type="number"
+                      value={selectedImg.penTipOffsetY !== undefined ? Math.round(selectedImg.penTipOffsetY) : ''}
+                      onChange={(e) => updatePenTipOffset(selectedImg.id, 'penTipOffsetY', Number(e.target.value))}
+                      placeholder="Not set"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
                     />
                   </div>
                 </div>
@@ -772,7 +862,7 @@ export default function Showcase() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-4 gap-2 mb-4">
                   <button
                     onClick={() => updateRotation(selectedImg.id, 0)}
                     className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium transition"
@@ -798,19 +888,30 @@ export default function Showcase() {
                     270°
                   </button>
                 </div>
+
+                <div className="p-3 bg-purple-50 rounded-lg text-sm text-gray-700">
+                  <strong>How it works:</strong>
+                  <ul className="mt-2 space-y-1">
+                    <li>• 🔴 Red dot = Pivot point (image rotates around this and stays locked)</li>
+                    <li>• 🟢 Green dot = Pen tip (follows rotation, draws on areas)</li>
+                    <li>• Click and drag image to rotate around pivot</li>
+                    <li>• Pen tip draws automatically when over drawable areas</li>
+                  </ul>
+                </div>
               </div>
             )}
 
             <div className="bg-blue-50 rounded-lg p-4">
-              <h3 className="font-semibold text-blue-900 mb-2">How to use:</h3>
+              <h3 className="font-semibold text-blue-900 mb-2">Instructions:</h3>
               <ol className="list-decimal list-inside text-sm text-blue-800 space-y-1">
-                <li>Load JSON with drawable areas from the Editor</li>
-                <li>Select an image and set its center point (pen tip)</li>
-                <li>Toggle "Drawing Mode" ON</li>
-                <li>Drag the image over drawable areas - the center point will draw!</li>
-                <li>Scroll drawable areas horizontally to see more canvas</li>
+                <li>Load JSON with pivot points and pen tips from Editor</li>
+                <li>Images are locked to their pivot points (red dot)</li>
+                <li>Click and drag an image to rotate it around its pivot</li>
+                <li>Pen tip (green dot) follows the rotation</li>
+                <li>When pen tip is over a drawable area, it draws!</li>
+                <li>Toggle Drawing Mode ON/OFF to control drawing</li>
                 <li>Adjust pen color and width as needed</li>
-                <li>Rotate images while they draw for creative effects</li>
+                <li>Scroll drawable areas to see more canvas</li>
               </ol>
             </div>
           </div>
