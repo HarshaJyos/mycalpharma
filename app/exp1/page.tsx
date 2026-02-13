@@ -982,7 +982,7 @@ export default function Experiment() {
                                 if (el) canvasRefs.current[area.id] = el
                               }}
                               style={{
-                                width: `${area.scrollWidth * scale}px`,
+                                width: `${(canvasRefs.current[area.id]?.width || area.scrollWidth * 3) * scale}px`,
                                 height: `${area.height * scale}px`,
                               }}
                             />
