@@ -36,11 +36,13 @@ interface ImageData {
   drawableAreas?: DrawableArea[]
 }
 
-interface ConcentrationStep {
-  concentration: number // in M (Molar)
-  label: string
-  response: number // percentage of max response (0-100)
-  duration: number // seconds for this step
+interface ObservationRecord {
+  sNo: number
+  concentration: number
+  amountAdded: number
+  concInBath: number
+  response: string
+  percentResponse: string
 }
 
 export default function Experiment() {
@@ -52,34 +54,50 @@ export default function Experiment() {
   const [jsonInput, setJsonInput] = useState('')
   const [error, setError] = useState('')
   const [scale, setScale] = useState(1)
-  const [experimentState, setExperimentState] = useState<'idle' | 'running' | 'paused' | 'completed'>('idle')
-  const [currentStep, setCurrentStep] = useState(0)
-  const [progress, setProgress] = useState(0)
-  const [leverRotation, setLeverRotation] = useState(0)
+  
+  // Experiment state
+  const [experimentRunning, setExperimentRunning] = useState(false)
+  const [selectedBaseline, setSelectedBaseline] = useState<number>(20)
+  const [selectedConcentration, setSelectedConcentration] = useState<number>(0.05)
+  const [currentLeverRotation, setCurrentLeverRotation] = useState(0)
+  const [observations, setObservations] = useState<ObservationRecord[]>([])
   const [autoScroll, setAutoScroll] = useState(true)
+  const [currentGraphX, setCurrentGraphX] = useState(0)
+  const [maxResponse, setMaxResponse] = useState(100) // mm - will be calculated
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
+  const [showCompleteGraph, setShowCompleteGraph] = useState(false)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
   const canvasWrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRefs = useRef<Record<string, HTMLCanvasElement>>({})
   const contextRefs = useRef<Record<string, CanvasRenderingContext2D>>({})
-  const animationFrameRef = useRef<number>()
-  const startTimeRef = useRef<number>(0)
   const drawableAreaRefs = useRef<Record<string, HTMLDivElement>>({})
+  const animationFrameRef = useRef<number>()
+  
+  // Available baselines and concentrations
+  const availableBaselines = [20, 50, 100, 200, 400]
+  const availableConcentrations = [0.05, 0.1, 0.2, 0.4, 0.8]
+  
+  // Organ bath volume (typical value)
+  const organBathVolume = 20 // mL
+  
+  // Maximum rotation angle to prevent overflow - REDUCED for better fit
+  const MAX_ROTATION_ANGLE = 20 // degrees (reduced from 35 to make graphs flatter)
 
-  // Acetylcholine dose-response curve data (based on Hill equation)
-  // EC50 for ACh on frog rectus abdominis is approximately 10^-6 M
-  const concentrationSteps: ConcentrationStep[] = [
-    { concentration: 0, label: 'Baseline', response: 0, duration: 3 },
-    { concentration: 1e-9, label: '10⁻⁹ M', response: 5, duration: 4 },
-    { concentration: 1e-8, label: '10⁻⁸ M', response: 15, duration: 4 },
-    { concentration: 1e-7, label: '10⁻⁷ M', response: 35, duration: 4 },
-    { concentration: 1e-6, label: '10⁻⁶ M (EC50)', response: 50, duration: 5 },
-    { concentration: 1e-5, label: '10⁻⁵ M', response: 85, duration: 5 },
-    { concentration: 1e-4, label: '10⁻⁴ M', response: 95, duration: 5 },
-    { concentration: 1e-3, label: '10⁻³ M', response: 98, duration: 5 },
-    { concentration: 0, label: 'Wash', response: 0, duration: 4 },
-  ]
+  // Toast auto-dismiss
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null)
+      }, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [toast])
+
+  const showToast = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
+    setToast({ message, type })
+  }
 
   // Calculate scale based on canvas dimensions
   useEffect(() => {
@@ -96,12 +114,14 @@ export default function Experiment() {
     }
   }, [imageData.baseImageDimensions])
 
-  // Initialize canvases
+  // Initialize canvases with dynamic expansion capability
   useEffect(() => {
     imageData.drawableAreas?.forEach(area => {
       const canvas = canvasRefs.current[area.id]
       if (canvas && !contextRefs.current[area.id]) {
-        canvas.width = area.scrollWidth
+        // Start with a large initial width that can hold many injections
+        const initialWidth = area.scrollWidth * 3 // Triple the initial size
+        canvas.width = initialWidth
         canvas.height = area.height
         const ctx = canvas.getContext('2d')
         if (ctx) {
@@ -113,7 +133,6 @@ export default function Experiment() {
           ctx.strokeStyle = '#e0e0e0'
           ctx.lineWidth = 1
           
-          // Vertical lines every 50px
           for (let x = 0; x < canvas.width; x += 50) {
             ctx.beginPath()
             ctx.moveTo(x, 0)
@@ -121,7 +140,6 @@ export default function Experiment() {
             ctx.stroke()
           }
           
-          // Horizontal lines every 50px
           for (let y = 0; y < canvas.height; y += 50) {
             ctx.beginPath()
             ctx.moveTo(0, y)
@@ -132,6 +150,41 @@ export default function Experiment() {
       }
     })
   }, [imageData.drawableAreas])
+  
+  // Function to expand canvas if needed
+  const expandCanvasIfNeeded = useCallback((areaId: string, requiredWidth: number) => {
+    const canvas = canvasRefs.current[areaId]
+    const ctx = contextRefs.current[areaId]
+    
+    if (canvas && ctx && requiredWidth > canvas.width - 200) {
+      // Need to expand - save current content
+      const currentImageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      
+      // Double the canvas width
+      const newWidth = canvas.width * 2
+      canvas.width = newWidth
+      
+      // Restore old content
+      ctx.putImageData(currentImageData, 0, 0)
+      
+      // Redraw grid on new area
+      const area = imageData.drawableAreas?.find(a => a.id === areaId)
+      if (area) {
+        ctx.fillStyle = area.color
+        ctx.strokeStyle = '#e0e0e0'
+        ctx.lineWidth = 1
+        
+        for (let x = 0; x < newWidth; x += 50) {
+          ctx.beginPath()
+          ctx.moveTo(x, 0)
+          ctx.lineTo(x, canvas.height)
+          ctx.stroke()
+        }
+      }
+      
+      console.log(`Canvas ${areaId} expanded to ${newWidth}px`)
+    }
+  }, [imageData])
 
   const handleJSONInput = () => {
     try {
@@ -154,6 +207,8 @@ export default function Experiment() {
       
       setImageData(processedData)
       contextRefs.current = {}
+      setCurrentGraphX(0)
+      setObservations([])
     } catch (err) {
       setError('Invalid JSON format. Please check your input.')
     }
@@ -184,6 +239,8 @@ export default function Experiment() {
           setJsonInput(JSON.stringify(data, null, 2))
           setError('')
           contextRefs.current = {}
+          setCurrentGraphX(0)
+          setObservations([])
         } catch (err) {
           setError('Invalid JSON file. Please check the file format.')
         }
@@ -206,12 +263,12 @@ export default function Experiment() {
     }
   }
 
-  const drawOnCanvas = useCallback((areaId: string, x: number, y: number, lastX?: number, lastY?: number) => {
+  const drawOnCanvas = useCallback((areaId: string, x: number, y: number, lastX?: number, lastY?: number, isVertical: boolean = false) => {
     const ctx = contextRefs.current[areaId]
     if (!ctx) return
 
-    ctx.strokeStyle = '#ff0000'
-    ctx.lineWidth = 2
+    ctx.strokeStyle = isVertical ? '#0000ff' : '#ff0000'
+    ctx.lineWidth = isVertical ? 1 : 2
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
 
@@ -227,209 +284,368 @@ export default function Experiment() {
     }
   }, [])
 
-  const startExperiment = useCallback(() => {
+  // Calculate response based on DRC formula
+  const calculateResponse = (baseline: number, concentration: number): number => {
+    // Based on the reference image:
+    // Baseline 50: 0.05 (tiny), 0.1 (small), 0.2 (medium), 0.4 (large), 0.8 (largest)
+    // Baseline 100: 0.8 gives same height
+    // Baseline 200: 0.8 gives same height
+    // Baseline 400: 0.8 gives same height
+    
+    // The concentration in bath after adding 1ml to 20ml bath
+    const amountAdded = 1 // mL
+    const concInBath = (concentration * amountAdded) / organBathVolume // µg/mL
+    
+    // Use Hill equation with parameters tuned to match reference
+    // EC50 should be around 0.005-0.01 to get good spread
+    const EC50 = 0.008 // µg/mL in bath
+    const hillCoefficient = 1.5
+    
+    // Hill equation
+    const numerator = Math.pow(concInBath, hillCoefficient)
+    const denominator = Math.pow(EC50, hillCoefficient) + Math.pow(concInBath, hillCoefficient)
+    const responsePercent = 100 * (numerator / denominator)
+    
+    // For debugging - see what we're calculating
+    console.log('=== DOSE-RESPONSE CALCULATION ===')
+    console.log('Stock concentration:', concentration, 'µg/mL')
+    console.log('Baseline:', baseline, 'µg/mL')
+    console.log('Amount added:', amountAdded, 'mL')
+    console.log('Bath volume:', organBathVolume, 'mL')
+    console.log('Final conc in bath:', concInBath.toFixed(4), 'µg/mL')
+    console.log('EC50:', EC50, 'µg/mL')
+    console.log('Response %:', responsePercent.toFixed(1), '%')
+    console.log('Expected angle:', (-(responsePercent / 100) * MAX_ROTATION_ANGLE).toFixed(1), '°')
+    console.log('==================================')
+    
+    return responsePercent
+  }
+
+  const performWash = useCallback(async () => {
     if (!imageData.baseImage || imageData.subImages.length === 0) {
-      alert('Please load experiment data first!')
+      showToast('Please load experiment data first!', 'error')
       return
     }
 
-    // Find the lever image (sub-1770900057664-0)
     const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
     if (!leverImage || leverImage.centerX === undefined || leverImage.centerY === undefined) {
-      alert('Lever image not properly configured with pivot point!')
+      showToast('Lever image not properly configured!', 'error')
       return
     }
 
-    if (!leverImage.penTipOffsetX || !leverImage.penTipOffsetY) {
-      alert('Pen tip not set on lever image!')
+    if (leverImage.penTipOffsetX === undefined || leverImage.penTipOffsetY === undefined) {
+      showToast('Pen tip not set on lever image!', 'error')
       return
     }
 
-    setExperimentState('running')
-    setCurrentStep(0)
-    setProgress(0)
-    setLeverRotation(0)
-    startTimeRef.current = Date.now()
+    showToast('Washing organ bath...', 'info')
+    setExperimentRunning(true)
 
-    // Clear all canvases
-    imageData.drawableAreas?.forEach(area => {
-      const ctx = contextRefs.current[area.id]
-      if (ctx) {
-        ctx.fillStyle = area.color
-        ctx.fillRect(0, 0, area.scrollWidth, area.height)
-        
-        // Redraw grid
-        ctx.strokeStyle = '#e0e0e0'
-        ctx.lineWidth = 1
-        for (let x = 0; x < area.scrollWidth; x += 50) {
-          ctx.beginPath()
-          ctx.moveTo(x, 0)
-          ctx.lineTo(x, area.height)
-          ctx.stroke()
-        }
-        for (let y = 0; y < area.height; y += 50) {
-          ctx.beginPath()
-          ctx.moveTo(0, y)
-          ctx.lineTo(area.scrollWidth, y)
-          ctx.stroke()
-        }
-      }
-    })
+    const startRotation = currentLeverRotation
+    const targetRotation = 0
+    const duration = 1500 // 1.5 seconds
+    const startTime = Date.now()
+    const fixedGraphX = currentGraphX // Fixed X position - no scrolling during wash
 
-    runExperimentAnimation()
-  }, [imageData])
+    console.log('=== WASH START ===')
+    console.log('Current rotation:', startRotation.toFixed(2), '°')
 
-  const runExperimentAnimation = useCallback(() => {
-    const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
-    if (!leverImage || leverImage.centerX === undefined || leverImage.centerY === undefined) return
+    // Get starting pen tip position
+    const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
+    const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
+    
+    const startPenTip = rotatePoint(
+      penTipLocalX,
+      penTipLocalY,
+      leverImage.centerX,
+      leverImage.centerY,
+      startRotation
+    )
+
+    // Get baseline (0 rotation) pen tip position
+    const baselinePenTip = rotatePoint(
+      penTipLocalX,
+      penTipLocalY,
+      leverImage.centerX,
+      leverImage.centerY,
+      0
+    )
 
     const animate = () => {
-      if (experimentState !== 'running') return
-
       const now = Date.now()
-      const elapsed = (now - startTimeRef.current) / 1000 // seconds
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
 
-      // Calculate total duration up to current step
-      let totalDuration = 0
-      let stepIndex = 0
-      for (let i = 0; i < concentrationSteps.length; i++) {
-        totalDuration += concentrationSteps[i].duration
-        if (elapsed < totalDuration) {
-          stepIndex = i
-          break
-        }
-        if (i === concentrationSteps.length - 1) {
-          // Experiment completed
-          setExperimentState('completed')
-          setCurrentStep(concentrationSteps.length)
-          return
-        }
-      }
+      // Fast exponential return to baseline
+      const easeProgress = 1 - Math.exp(-5 * progress)
 
-      setCurrentStep(stepIndex)
-
-      // Calculate progress within current step
-      const stepStartTime = concentrationSteps.slice(0, stepIndex).reduce((sum, step) => sum + step.duration, 0)
-      const stepProgress = (elapsed - stepStartTime) / concentrationSteps[stepIndex].duration
-      setProgress(Math.min(stepProgress * 100, 100))
-
-      // Calculate muscle contraction (lever rotation)
-      const currentConcentration = concentrationSteps[stepIndex]
-      const targetResponse = currentConcentration.response
-
-      // Smooth transition to target response
-      const currentResponse = targetResponse * Math.min(stepProgress, 1)
+      const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
       
-      // Convert response (0-100%) to rotation angle
-      // Assuming 0° = baseline, -45° = maximum contraction
-      const targetRotation = -(currentResponse / 100) * 45
-      setLeverRotation(targetRotation)
-
-      // Update lever rotation in image data
+      setCurrentLeverRotation(currentRotation)
       setImageData(prev => ({
         ...prev,
         subImages: prev.subImages.map(img =>
-          img.id === leverImage.id
-            ? { ...img, rotation: targetRotation }
-            : img
+          img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
         )
       }))
 
-      // Calculate pen tip position and draw
-      if (leverImage.penTipOffsetX !== undefined && leverImage.penTipOffsetY !== undefined) {
-        const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
-        const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
-        
-        const rotatedPenTip = rotatePoint(
-          penTipLocalX,
-          penTipLocalY,
-          leverImage.centerX,
-          leverImage.centerY,
-          targetRotation
-        )
-
+      if (progress >= 1) {
+        // Draw final vertical line from start to baseline
         imageData.drawableAreas?.forEach(area => {
           if (
-            rotatedPenTip.x >= area.x &&
-            rotatedPenTip.x <= area.x + area.width &&
-            rotatedPenTip.y >= area.y &&
-            rotatedPenTip.y <= area.y + area.height
+            startPenTip.x >= area.x &&
+            startPenTip.x <= area.x + area.width &&
+            startPenTip.y >= area.y &&
+            startPenTip.y <= area.y + area.height
           ) {
-            // Calculate scroll position based on elapsed time
-            // Scroll from left to right over the entire experiment
-            const totalExperimentDuration = concentrationSteps.reduce((sum, step) => sum + step.duration, 0)
-            const scrollProgress = elapsed / totalExperimentDuration
-            const scrollPosition = scrollProgress * (area.scrollWidth - area.width)
+            const canvasX = fixedGraphX
+            const startY = startPenTip.y - area.y
+            const endY = baselinePenTip.y - area.y
 
-            // Auto-scroll the drawable area
-            if (autoScroll && drawableAreaRefs.current[area.id]) {
-              drawableAreaRefs.current[area.id].scrollLeft = scrollPosition * scale
+            const ctx = contextRefs.current[area.id]
+            if (ctx) {
+              ctx.strokeStyle = '#0000ff'
+              ctx.lineWidth = 2
+              ctx.beginPath()
+              ctx.moveTo(canvasX, startY)
+              ctx.lineTo(canvasX, endY)
+              ctx.stroke()
             }
-
-            const localX = rotatedPenTip.x - area.x + scrollPosition
-            const localY = rotatedPenTip.y - area.y
-
-            // Get last drawn position for this area
-            const lastPosKey = `${area.id}_last`
-            const lastPos = (window as any)[lastPosKey]
-            
-            if (lastPos) {
-              drawOnCanvas(area.id, localX, localY, lastPos.x, lastPos.y)
-            } else {
-              drawOnCanvas(area.id, localX, localY)
-            }
-
-            (window as any)[lastPosKey] = { x: localX, y: localY }
           }
         })
-      }
 
-      animationFrameRef.current = requestAnimationFrame(animate)
+        setExperimentRunning(false)
+        setCurrentGraphX(fixedGraphX + 15) // Small spacing after wash
+        
+        console.log('=== WASH COMPLETE ===')
+        showToast('Wash completed', 'success')
+      } else {
+        animationFrameRef.current = requestAnimationFrame(animate)
+      }
     }
 
     animationFrameRef.current = requestAnimationFrame(animate)
-  }, [imageData, experimentState, autoScroll, drawOnCanvas])
+  }, [imageData, currentLeverRotation, currentGraphX, rotatePoint])
 
-  useEffect(() => {
-    if (experimentState === 'running') {
-      runExperimentAnimation()
+  const performInjection = useCallback(async () => {
+    if (!imageData.baseImage || imageData.subImages.length === 0) {
+      showToast('Please load experiment data first!', 'error')
+      return
     }
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
+
+    const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
+    if (!leverImage || leverImage.centerX === undefined || leverImage.centerY === undefined) {
+      showToast('Lever image not properly configured!', 'error')
+      return
+    }
+
+    if (leverImage.penTipOffsetX === undefined || leverImage.penTipOffsetY === undefined) {
+      showToast('Pen tip not set on lever image!', 'error')
+      return
+    }
+
+    showToast(`Injecting ${selectedConcentration} µg/mL ACh on ${selectedBaseline} µg/mL baseline...`, 'info')
+    setExperimentRunning(true)
+
+    // Calculate target response
+    const responsePercent = calculateResponse(selectedBaseline, selectedConcentration)
+    const targetRotation = -(responsePercent / 100) * MAX_ROTATION_ANGLE
+
+    console.log('=== INJECTION START ===')
+    console.log('Baseline:', selectedBaseline, 'µg/mL')
+    console.log('Concentration:', selectedConcentration, 'µg/mL')
+    console.log('Response %:', responsePercent.toFixed(2), '%')
+    console.log('Target rotation:', targetRotation.toFixed(2), '°')
+
+    const startRotation = currentLeverRotation
+    const duration = 3000 // 3 seconds for very smooth curve
+    const startTime = Date.now()
+    const startGraphX = currentGraphX
+    const graphWidth = 100 // Reduced width for better fit
+
+    // Track last position per area - CRITICAL for continuous lines
+    const areaLastPos: Record<string, { x: number; y: number }> = {}
+
+    const animate = () => {
+      const now = Date.now()
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+
+      // Smooth sigmoid for biological response
+      const easeProgress = 1 / (1 + Math.exp(-8 * (progress - 0.5)))
+      
+      const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
+
+      setCurrentLeverRotation(currentRotation)
+      setImageData(prev => ({
+        ...prev,
+        subImages: prev.subImages.map(img =>
+          img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
+        )
+      }))
+
+      // Calculate pen tip world position
+      // CRITICAL: penTipOffsetX and penTipOffsetY are RELATIVE to the image's top-left corner
+      // So the absolute pen tip position is: image.x + offset
+      const penTipAbsoluteX = leverImage.x + leverImage.penTipOffsetX
+      const penTipAbsoluteY = leverImage.y + leverImage.penTipOffsetY
+      
+      // Now rotate this absolute position around the pivot point
+      const rotatedPenTip = rotatePoint(
+        penTipAbsoluteX,
+        penTipAbsoluteY,
+        leverImage.centerX,
+        leverImage.centerY,
+        currentRotation
+      )
+
+      console.log('Pen tip calc:', {
+        imageX: leverImage.x,
+        imageY: leverImage.y,
+        offsetX: leverImage.penTipOffsetX,
+        offsetY: leverImage.penTipOffsetY,
+        absoluteX: penTipAbsoluteX,
+        absoluteY: penTipAbsoluteY,
+        pivotX: leverImage.centerX,
+        pivotY: leverImage.centerY,
+        rotation: currentRotation.toFixed(2),
+        rotatedX: rotatedPenTip.x.toFixed(2),
+        rotatedY: rotatedPenTip.y.toFixed(2)
+      })
+
+      // X position moves linearly across the graph
+      const currentXOffset = startGraphX + (progress * graphWidth)
+
+      // Draw on canvas
+      imageData.drawableAreas?.forEach(area => {
+        // Check if we need to expand canvas
+        expandCanvasIfNeeded(area.id, currentXOffset + 300)
+        
+        if (
+          rotatedPenTip.x >= area.x &&
+          rotatedPenTip.x <= area.x + area.width &&
+          rotatedPenTip.y >= area.y &&
+          rotatedPenTip.y <= area.y + area.height
+        ) {
+          // X moves linearly
+          const currentXOffset = startGraphX + (progress * graphWidth)
+          
+          // Auto-scroll: keep the current drawing position centered in visible area
+          if (autoScroll && drawableAreaRefs.current[area.id]) {
+            const canvas = canvasRefs.current[area.id]
+            const visibleWidth = area.width
+            // Center the current drawing position in the viewport
+            const targetScrollLeft = currentXOffset - (visibleWidth / 2)
+            // Clamp to valid range
+            const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth  
+            const clampedScroll = Math.max(0, Math.min(targetScrollLeft, maxScrollLeft))
+            drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
+            
+            console.log('Auto-scroll:', {
+              currentXOffset: currentXOffset.toFixed(2),
+              visibleWidth: visibleWidth.toFixed(2),
+              targetScroll: targetScrollLeft.toFixed(2),
+              actualScroll: clampedScroll.toFixed(2),
+              scale
+            })
+          }
+
+          const canvasX = currentXOffset
+          const canvasY = rotatedPenTip.y - area.y
+
+          // CRITICAL: Always draw line from last position to create continuous curve
+          const lastPos = areaLastPos[area.id]
+          if (lastPos) {
+            // Draw line segment
+            const ctx = contextRefs.current[area.id]
+            if (ctx) {
+              ctx.strokeStyle = '#ff0000'
+              ctx.lineWidth = 2
+              ctx.lineCap = 'round'
+              ctx.lineJoin = 'round'
+              ctx.beginPath()
+              ctx.moveTo(lastPos.x, lastPos.y)
+              ctx.lineTo(canvasX, canvasY)
+              ctx.stroke()
+            }
+          }
+
+          // Update last position for next frame
+          areaLastPos[area.id] = { x: canvasX, y: canvasY }
+        }
+      })
+
+      if (progress < 1) {
+        animationFrameRef.current = requestAnimationFrame(animate)
+      } else {
+        setExperimentRunning(false)
+        setCurrentGraphX(startGraphX + graphWidth)
+        
+        const amountAdded = 1
+        const concInBath = (selectedConcentration * amountAdded) / organBathVolume
+        
+        setObservations(prev => [...prev, {
+          sNo: prev.length + 1,
+          concentration: selectedConcentration,
+          amountAdded,
+          concInBath,
+          response: '',
+          percentResponse: ''
+        }])
+        
+        console.log('=== INJECTION COMPLETE ===')
+        console.log('Final rotation:', currentRotation.toFixed(2), '°')
+        
+        showToast('Injection completed!', 'success')
       }
     }
-  }, [experimentState, runExperimentAnimation])
 
-  const pauseExperiment = () => {
-    setExperimentState('paused')
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
-    }
-  }
+    animationFrameRef.current = requestAnimationFrame(animate)
+  }, [imageData, currentLeverRotation, currentGraphX, selectedBaseline, selectedConcentration, autoScroll, rotatePoint, calculateResponse, expandCanvasIfNeeded])
 
-  const resumeExperiment = () => {
-    setExperimentState('running')
-    startTimeRef.current = Date.now() - (currentStep * concentrationSteps[currentStep]?.duration * 1000)
-    runExperimentAnimation()
+  const updateObservationResponse = (index: number, response: string) => {
+    setObservations(prev => {
+      const updated = [...prev]
+      updated[index].response = response
+      
+      // Calculate percent response
+      if (response && !isNaN(parseFloat(response))) {
+        const responseValue = parseFloat(response)
+        
+        // Find max response from all entries
+        const allResponses = updated
+          .map(obs => obs.response ? parseFloat(obs.response) : 0)
+          .filter(r => r > 0)
+        
+        const currentMax = Math.max(...allResponses, responseValue)
+        
+        // Calculate percentage
+        const percent = ((responseValue / currentMax) * 100).toFixed(2)
+        updated[index].percentResponse = percent
+        
+        // Recalculate all percentages based on new max
+        updated.forEach((obs, i) => {
+          if (obs.response && !isNaN(parseFloat(obs.response))) {
+            const obsResponse = parseFloat(obs.response)
+            updated[i].percentResponse = ((obsResponse / currentMax) * 100).toFixed(2)
+          }
+        })
+      }
+      
+      return updated
+    })
   }
 
   const resetExperiment = () => {
-    setExperimentState('idle')
-    setCurrentStep(0)
-    setProgress(0)
-    setLeverRotation(0)
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
-    }
-
+    setCurrentLeverRotation(0)
+    setCurrentGraphX(0)
+    setObservations([])
+    
     // Reset lever rotation
     setImageData(prev => ({
       ...prev,
       subImages: prev.subImages.map(img =>
-        img.id === 'sub-1770900057664-0'
-          ? { ...img, rotation: 0 }
-          : img
+        img.id === 'sub-1770900057664-0' ? { ...img, rotation: 0 } : img
       )
     }))
 
@@ -459,8 +675,9 @@ export default function Experiment() {
       if (drawableAreaRefs.current[area.id]) {
         drawableAreaRefs.current[area.id].scrollLeft = 0
       }
-      delete (window as any)[`${area.id}_last`]
     })
+    
+    showToast('Experiment reset - ready for new trial', 'info')
   }
 
   const allItems = [
@@ -468,10 +685,26 @@ export default function Experiment() {
     ...(imageData.drawableAreas || []).map(area => ({ ...area, type: 'area' as const }))
   ].sort((a, b) => a.zIndex - b.zIndex)
 
-  const totalDuration = concentrationSteps.reduce((sum, step) => sum + step.duration, 0)
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-8">
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-8 right-8 z-50 animate-in slide-in-from-top duration-300">
+          <div className={`px-6 py-4 rounded-lg shadow-2xl border-2 backdrop-blur-md ${
+            toast.type === 'success' ? 'bg-green-500/90 border-green-300 text-white' :
+            toast.type === 'error' ? 'bg-red-500/90 border-red-300 text-white' :
+            'bg-blue-500/90 border-blue-300 text-white'
+          }`}>
+            <div className="flex items-center space-x-3">
+              <div className="text-2xl">
+                {toast.type === 'success' ? '✓' : toast.type === 'error' ? '✕' : 'ℹ'}
+              </div>
+              <div className="font-semibold">{toast.message}</div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -536,43 +769,71 @@ export default function Experiment() {
             <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl p-6 border border-white/20">
               <h2 className="text-xl font-semibold mb-4 text-white">Experiment Controls</h2>
               
-              <div className="space-y-3">
-                {experimentState === 'idle' && (
-                  <button
-                    onClick={startExperiment}
-                    disabled={!imageData.baseImage}
-                    className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              <div className="space-y-4">
+                {/* Baseline Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-blue-100 mb-2">
+                    Baseline (µg/mL)
+                  </label>
+                  <select
+                    value={selectedBaseline}
+                    onChange={(e) => setSelectedBaseline(Number(e.target.value))}
+                    disabled={experimentRunning}
+                    className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                   >
-                    ▶ Start Experiment
-                  </button>
-                )}
+                    {availableBaselines.map(baseline => (
+                      <option key={baseline} value={baseline} className="bg-slate-800">
+                        {baseline}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                {experimentState === 'running' && (
-                  <button
-                    onClick={pauseExperiment}
-                    className="w-full px-6 py-3 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition font-semibold text-lg"
+                {/* Concentration Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-blue-100 mb-2">
+                    Concentration (µg/mL)
+                  </label>
+                  <select
+                    value={selectedConcentration}
+                    onChange={(e) => setSelectedConcentration(Number(e.target.value))}
+                    disabled={experimentRunning}
+                    className="w-full px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                   >
-                    ⏸ Pause
-                  </button>
-                )}
+                    {availableConcentrations.map(conc => (
+                      <option key={conc} value={conc} className="bg-slate-800">
+                        {conc}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                {experimentState === 'paused' && (
+                {/* Action Buttons */}
+                <div className="grid grid-cols-2 gap-3 pt-4">
                   <button
-                    onClick={resumeExperiment}
-                    className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold text-lg"
+                    onClick={performWash}
+                    disabled={experimentRunning || !imageData.baseImage}
+                    className="px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    ▶ Resume
+                    💧 Wash
                   </button>
-                )}
+                  
+                  <button
+                    onClick={performInjection}
+                    disabled={experimentRunning || !imageData.baseImage}
+                    className="px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    💉 Inject
+                  </button>
+                </div>
 
-                {experimentState !== 'idle' && (
-                  <button
-                    onClick={resetExperiment}
-                    className="w-full px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-semibold"
-                  >
-                    🔄 Reset
-                  </button>
-                )}
+                <button
+                  onClick={resetExperiment}
+                  disabled={experimentRunning}
+                  className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-semibold disabled:opacity-50"
+                >
+                  🔄 Reset
+                </button>
 
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/20">
                   <label className="text-sm font-medium text-blue-100">
@@ -597,90 +858,37 @@ export default function Experiment() {
               <h2 className="text-xl font-semibold mb-4 text-white">Current Status</h2>
               
               <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm text-blue-100 mb-1">
-                    <span>Step Progress</span>
-                    <span>{Math.round(progress)}%</span>
+                <div className="bg-white/5 rounded-lg p-4 border border-white/10">
+                  <div className="text-sm text-blue-100 mb-1">Selected Settings</div>
+                  <div className="text-lg font-bold text-white">
+                    Baseline: {selectedBaseline} µg/mL
                   </div>
-                  <div className="w-full bg-white/20 rounded-full h-2">
-                    <div 
-                      className="bg-blue-500 h-2 rounded-full transition-all duration-100"
-                      style={{ width: `${progress}%` }}
-                    />
+                  <div className="text-sm text-blue-200">
+                    Concentration: {selectedConcentration} µg/mL
                   </div>
                 </div>
-
-                {currentStep < concentrationSteps.length && (
-                  <div className="bg-white/5 rounded-lg p-4 border border-white/10">
-                    <div className="text-sm text-blue-100 mb-1">Current Concentration</div>
-                    <div className="text-2xl font-bold text-white">
-                      {concentrationSteps[currentStep].label}
-                    </div>
-                    <div className="text-sm text-blue-200 mt-2">
-                      Response: {concentrationSteps[currentStep].response}%
-                    </div>
-                  </div>
-                )}
 
                 <div>
                   <div className="text-sm text-blue-100 mb-1">Muscle Contraction</div>
                   <div className="text-3xl font-bold text-white">
-                    {Math.abs(Math.round(leverRotation))}°
+                    {Math.abs(Math.round(currentLeverRotation))}°
                   </div>
                 </div>
 
                 <div>
-                  <div className="text-sm text-blue-100 mb-1">Experiment State</div>
+                  <div className="text-sm text-blue-100 mb-1">Status</div>
                   <div className={`text-lg font-bold ${
-                    experimentState === 'running' ? 'text-green-400' :
-                    experimentState === 'paused' ? 'text-yellow-400' :
-                    experimentState === 'completed' ? 'text-blue-400' :
-                    'text-gray-400'
+                    experimentRunning ? 'text-green-400' : 'text-gray-400'
                   }`}>
-                    {experimentState.toUpperCase()}
+                    {experimentRunning ? 'RUNNING' : 'READY'}
                   </div>
                 </div>
-              </div>
-            </div>
-
-            {/* Concentration Steps */}
-            <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl p-6 border border-white/20">
-              <h2 className="text-xl font-semibold mb-4 text-white">Protocol Steps</h2>
-              
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {concentrationSteps.map((step, index) => (
-                  <div
-                    key={index}
-                    className={`p-3 rounded-lg border transition ${
-                      index === currentStep && experimentState === 'running'
-                        ? 'bg-blue-500/30 border-blue-400'
-                        : index < currentStep
-                        ? 'bg-green-500/20 border-green-400/50'
-                        : 'bg-white/5 border-white/10'
-                    }`}
-                  >
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="font-semibold text-white">{step.label}</div>
-                        <div className="text-xs text-blue-200">
-                          Response: {step.response}% • Duration: {step.duration}s
-                        </div>
-                      </div>
-                      {index === currentStep && experimentState === 'running' && (
-                        <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
-                      )}
-                      {index < currentStep && (
-                        <div className="text-green-400">✓</div>
-                      )}
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           </div>
 
           {/* Right Panel - Apparatus Display */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-6">
             <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl p-6 border border-white/20" ref={canvasWrapperRef}>
               <h2 className="text-xl font-semibold mb-4 text-white">Experimental Apparatus</h2>
               
@@ -785,50 +993,143 @@ export default function Experiment() {
                   </div>
                 </div>
               )}
+            </div>
 
-              {experimentState === 'completed' && (
-                <div className="mt-6 p-4 bg-green-500/20 border border-green-400 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-lg font-bold text-green-300">Experiment Completed!</div>
-                      <div className="text-sm text-green-200 mt-1">
-                        Total duration: {totalDuration} seconds
+            {/* Observation Table */}
+            <div className="mt-6 bg-white/10 backdrop-blur-md rounded-xl shadow-2xl p-6 border border-white/20">
+              <h2 className="text-xl font-semibold mb-4 text-white">Observation Records</h2>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-white">
+                  <thead className="bg-white/10 border-b border-white/20">
+                    <tr>
+                      <th className="px-4 py-3 text-left">S.No</th>
+                      <th className="px-4 py-3 text-left">Conc. of ACh (µg/mL)</th>
+                      <th className="px-4 py-3 text-left">Amount Added (mL)</th>
+                      <th className="px-4 py-3 text-left">Conc. in Organ Bath (µg/mL)</th>
+                      <th className="px-4 py-3 text-left">Response (mm)</th>
+                      <th className="px-4 py-3 text-left">Percent Dose Response (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {observations.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                          No observations recorded yet. Start the experiment!
+                        </td>
+                      </tr>
+                    ) : (
+                      observations.map((obs, index) => (
+                        <tr key={index} className="border-b border-white/10 hover:bg-white/5">
+                          <td className="px-4 py-3">{obs.sNo}</td>
+                          <td className="px-4 py-3">{obs.concentration.toFixed(2)}</td>
+                          <td className="px-4 py-3">{obs.amountAdded.toFixed(2)}</td>
+                          <td className="px-4 py-3">{obs.concInBath.toFixed(4)}</td>
+                          <td className="px-4 py-3">
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={obs.response}
+                              onChange={(e) => updateObservationResponse(index, e.target.value)}
+                              placeholder="Enter"
+                              className="w-24 px-2 py-1 bg-white/10 border border-white/20 rounded text-white focus:ring-2 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-green-300">
+                            {obs.percentResponse}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Show Complete Graph Button and Display */}
+            <div className="mt-6 bg-white/10 backdrop-blur-md rounded-xl shadow-2xl p-6 border border-white/20">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-white">Complete Graph View</h2>
+                <button
+                  onClick={() => setShowCompleteGraph(!showCompleteGraph)}
+                  className={`px-6 py-3 rounded-lg transition font-semibold ${
+                    showCompleteGraph
+                      ? 'bg-red-600 text-white hover:bg-red-700'
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                  }`}
+                >
+                  {showCompleteGraph ? '✕ Hide Graph' : '📊 Show Complete Graph'}
+                </button>
+              </div>
+
+              {showCompleteGraph && (
+                <div className="border-2 border-white/20 rounded-lg overflow-hidden bg-black/30 p-4">
+                  <p className="text-sm text-blue-200 mb-4">
+                    Complete kymograph showing all recorded contractions:
+                  </p>
+                  
+                  {imageData.drawableAreas?.map(area => {
+                    const canvas = canvasRefs.current[area.id]
+                    if (!canvas) return null
+
+                    // Calculate the actual used width (currentGraphX + some padding)
+                    const usedWidth = Math.max(currentGraphX + 100, area.scrollWidth)
+                    const displayScale = 0.8 // Slightly smaller for overview
+
+                    return (
+                      <div key={area.id} className="mb-4">
+                        <div className="overflow-x-auto overflow-y-hidden border border-white/10 rounded">
+                          <canvas
+                            ref={(el) => {
+                              if (el && canvas) {
+                                // Copy the original canvas content to this display canvas
+                                el.width = canvas.width
+                                el.height = canvas.height
+                                const ctx = el.getContext('2d')
+                                if (ctx) {
+                                  ctx.drawImage(canvas, 0, 0)
+                                }
+                              }
+                            }}
+                            style={{
+                              width: `${usedWidth * displayScale}px`,
+                              height: `${area.height * displayScale}px`,
+                              display: 'block',
+                            }}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-400 mt-2 text-center">
+                          Total graph width: {Math.round(currentGraphX)}px | Canvas: {canvas.width}px
+                        </p>
                       </div>
-                    </div>
-                    <div className="text-4xl">✓</div>
-                  </div>
+                    )
+                  })}
                 </div>
               )}
             </div>
 
             {/* Information Panel */}
             <div className="mt-6 bg-white/10 backdrop-blur-md rounded-xl shadow-2xl p-6 border border-white/20">
-              <h2 className="text-xl font-semibold mb-4 text-white">About This Experiment</h2>
+              <h2 className="text-xl font-semibold mb-4 text-white">Instructions</h2>
               
               <div className="space-y-3 text-blue-100 text-sm">
-                <p>
-                  <strong className="text-white">Objective:</strong> To study the dose-response relationship of 
-                  acetylcholine on the frog rectus abdominis muscle and determine the EC₅₀ value.
-                </p>
-                
-                <p>
-                  <strong className="text-white">Principle:</strong> Acetylcholine (ACh) is a neurotransmitter that 
-                  causes muscle contraction by binding to nicotinic receptors. The degree of contraction is 
-                  proportional to the concentration of ACh, following the Hill equation.
-                </p>
-                
-                <p>
-                  <strong className="text-white">EC₅₀:</strong> The concentration at which 50% of the maximum 
-                  response is observed. For ACh on frog rectus abdominis, EC₅₀ ≈ 10⁻⁶ M.
-                </p>
+                <ol className="list-decimal list-inside space-y-2">
+                  <li>Load the experimental apparatus JSON file</li>
+                  <li>Select a baseline concentration (20, 50, 100, 200, or 400 µg/mL)</li>
+                  <li>Select an ACh concentration (0.05, 0.1, 0.2, 0.4, or 0.8 µg/mL)</li>
+                  <li>Click "Inject" to add the drug to the organ bath</li>
+                  <li>Observe the muscle contraction on the kymograph</li>
+                  <li>Enter the response measurement (mm) in the observation table</li>
+                  <li>Click "Wash" to return the lever to baseline between injections</li>
+                  <li>Repeat with different concentrations to build the dose-response curve</li>
+                  <li>The percent dose response is calculated automatically</li>
+                </ol>
 
                 <div className="bg-white/5 rounded-lg p-4 mt-4 border border-white/10">
-                  <strong className="text-white block mb-2">Hill Equation:</strong>
-                  <div className="font-mono text-xs bg-black/30 p-3 rounded border border-white/10">
-                    Response = (E<sub>max</sub> × [ACh]<sup>n</sup>) / (EC₅₀<sup>n</sup> + [ACh]<sup>n</sup>)
-                  </div>
-                  <p className="text-xs mt-2 text-blue-200">
-                    Where E<sub>max</sub> is maximum response, [ACh] is concentration, and n is Hill coefficient
+                  <strong className="text-white block mb-2">About the Experiment:</strong>
+                  <p className="text-xs text-blue-200">
+                    This simulation demonstrates the dose-response relationship of acetylcholine on the frog rectus abdominis muscle. 
+                    The muscle contraction is proportional to the drug concentration, following pharmacological principles.
                   </p>
                 </div>
               </div>
