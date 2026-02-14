@@ -1,4 +1,3 @@
-// app/exp1/page.tsx
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
@@ -15,137 +14,44 @@ import {
   Legend,
 } from 'chart.js'
 import { BookOpen, Settings, ClipboardList, BarChart3, Home, RotateCcw } from 'lucide-react'
+import { useExperimentStore, SubImage, DrawableArea } from './store'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend)
-
-interface SubImage {
-  id: string
-  url: string
-  x: number
-  y: number
-  width: number
-  height: number
-  centerX?: number
-  centerY?: number
-  penTipOffsetX?: number
-  penTipOffsetY?: number
-  rotation?: number
-  zIndex: number
-}
-
-interface DrawableArea {
-  id: string
-  x: number
-  y: number
-  width: number
-  height: number
-  scrollWidth: number
-  zIndex: number
-  color: string
-}
-
-interface ImageData {
-  baseImage: string
-  baseImageDimensions: { width: number; height: number }
-  subImages: SubImage[]
-  drawableAreas: DrawableArea[]
-}
-
-interface ObservationRecord {
-  sNo: number
-  concentration: number
-  amountAdded: number
-  concInBath: number
-  response: string
-  percentResponse: string
-}
 
 const ORGAN_BATH_VOLUME = 20
 const MAX_ROTATION_ANGLE = 20
 
-// Hardcoded initial data
-const INITIAL_DATA: ImageData = {
-  "baseImage": "data:image/png;base64,examplebase64string",
-  "baseImageDimensions": {
-    "width": 2133,
-    "height": 1200
-  },
-  "subImages": [
-    {
-      "id": "sub-1770900016794-0",
-      "url": "data:image/png;base64,examplebase64string",
-      "x": 486,
-      "y": 237,
-      "width": 600,
-      "height": 906,
-      "zIndex": 1
-    },
-    {
-      "id": "sub-1770900057664-0",
-      "url": "data:image/png;base64,examplebase64string",
-      "x": 770,
-      "y": 328,
-      "width": 680,
-      "height": 59,
-      "centerX": 986,
-      "centerY": 358,
-      "penTipOffsetX": 649,
-      "penTipOffsetY": 27,
-      "zIndex": 4
-    },
-    {
-      "id": "sub-1770900032250-0",
-      "url": "data:image/png;base64,examplebase64string",
-      "x": 1147,
-      "y": 39,
-      "width": 488,
-      "height": 1092,
-      "zIndex": 2
-    }
-  ],
-  "drawableAreas": [
-    {
-      "id": "area-1770900050218",
-      "x": 1245,
-      "y": 175,
-      "width": 264.9523212045169,
-      "height": 278.33375156838144,
-      "scrollWidth": 794.8569636135508,
-      "zIndex": 3,
-      "color": "#ffffff"
-    }
-  ]
-}
-
-
-
 export default function Exp1Page() {
-  const [activeTab, setActiveTab] = useState<'theory' | 'setup' | 'observation' | 'graphs'>('setup')
-  const [theorySubTab, setTheorySubTab] = useState<'introduction' | 'procedure' | 'precautions'>('introduction')
+  const {
+    activeTab, setActiveTab,
+    theorySubTab, setTheorySubTab,
+    imageData, setImageData,
+    experimentRunning, setExperimentRunning,
+    selectedBaseline, setSelectedBaseline,
+    selectedConcentration, setSelectedConcentration,
+    currentLeverRotation, setCurrentLeverRotation,
+    observations, setObservations,
+    autoScroll, setAutoScroll,
+    currentGraphX, setCurrentGraphX,
+    maxResponse, setMaxResponse,
+    canvasData, setCanvasData,
+    canvasWidths, setCanvasWidths,
+    resetExperiment: resetStore
+  } = useExperimentStore()
 
-  // Core state
-  const [imageData, setImageData] = useState<ImageData>(INITIAL_DATA)
-  const [experimentRunning, setExperimentRunning] = useState(false)
-  const [selectedBaseline, setSelectedBaseline] = useState<number>(20)
-  const [selectedConcentration, setSelectedConcentration] = useState<number>(0.05)
-  const [currentLeverRotation, setCurrentLeverRotation] = useState(0)
-  const [observations, setObservations] = useState<ObservationRecord[]>([])
-  const [autoScroll, setAutoScroll] = useState(true)
-  const [currentGraphX, setCurrentGraphX] = useState(0)
-  const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
-  const [maxResponse, setMaxResponse] = useState(100)
   const availableBaselines = [20, 50, 100, 200, 400]
   const availableConcentrations = [0.05, 0.1, 0.2, 0.4, 0.8]
+
   const canvasWrapperRef = useRef<HTMLDivElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+
   const canvasRefs = useRef<Record<string, HTMLCanvasElement>>({})
   const contextRefs = useRef<Record<string, CanvasRenderingContext2D>>({})
   const drawableAreaRefs = useRef<Record<string, HTMLDivElement>>({})
   const animationFrameRef = useRef<number>()
 
+  // UI Scale can remain local as it's derived from window size/layout
   const [scale, setScale] = useState(1)
-  const [canvasWidths, setCanvasWidths] = useState<Record<string, number>>({})
-  const [canvasData, setCanvasData] = useState<Record<string, string>>({})
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
 
   useEffect(() => {
     if (toast) {
@@ -158,92 +64,15 @@ export default function Exp1Page() {
     setToast({ message, type })
   }
 
-  // Load from localStorage on mount
   useEffect(() => {
-    const savedImageData = localStorage.getItem('imageData')
-    if (savedImageData) {
-      setImageData(JSON.parse(savedImageData))
-    }
-
-    const savedObservations = localStorage.getItem('observations')
-    if (savedObservations) {
-      setObservations(JSON.parse(savedObservations))
-    }
-
-    const savedCurrentLeverRotation = localStorage.getItem('currentLeverRotation')
-    if (savedCurrentLeverRotation) {
-      setCurrentLeverRotation(Number(savedCurrentLeverRotation))
-    }
-
-    const savedCurrentGraphX = localStorage.getItem('currentGraphX')
-    if (savedCurrentGraphX) {
-      setCurrentGraphX(Number(savedCurrentGraphX))
-    }
-
-    const savedMaxResponse = localStorage.getItem('maxResponse')
-    if (savedMaxResponse) {
-      setMaxResponse(Number(savedMaxResponse))
-    }
-
-    const savedAutoScroll = localStorage.getItem('autoScroll')
-    if (savedAutoScroll) {
-      setAutoScroll(JSON.parse(savedAutoScroll))
-    }
-
-    const savedSelectedBaseline = localStorage.getItem('selectedBaseline')
-    if (savedSelectedBaseline) {
-      setSelectedBaseline(Number(savedSelectedBaseline))
-    }
-
-    const savedSelectedConcentration = localStorage.getItem('selectedConcentration')
-    if (savedSelectedConcentration) {
-      setSelectedConcentration(Number(savedSelectedConcentration))
-    }
-
-    const savedCanvasData = localStorage.getItem('canvasData')
-    if (savedCanvasData) {
-      setCanvasData(JSON.parse(savedCanvasData))
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
     }
   }, [])
 
-  // Save to localStorage when state changes
-  useEffect(() => {
-    localStorage.setItem('imageData', JSON.stringify(imageData))
-  }, [imageData])
-
-  useEffect(() => {
-    localStorage.setItem('observations', JSON.stringify(observations))
-  }, [observations])
-
-  useEffect(() => {
-    localStorage.setItem('currentLeverRotation', currentLeverRotation.toString())
-  }, [currentLeverRotation])
-
-  useEffect(() => {
-    localStorage.setItem('currentGraphX', currentGraphX.toString())
-  }, [currentGraphX])
-
-  useEffect(() => {
-    localStorage.setItem('maxResponse', maxResponse.toString())
-  }, [maxResponse])
-
-  useEffect(() => {
-    localStorage.setItem('autoScroll', JSON.stringify(autoScroll))
-  }, [autoScroll])
-
-  useEffect(() => {
-    localStorage.setItem('selectedBaseline', selectedBaseline.toString())
-  }, [selectedBaseline])
-
-  useEffect(() => {
-    localStorage.setItem('selectedConcentration', selectedConcentration.toString())
-  }, [selectedConcentration])
-
-  useEffect(() => {
-    localStorage.setItem('canvasData', JSON.stringify(canvasData))
-  }, [canvasData])
-
-  // Scale
+  // Scale calculation
   useEffect(() => {
     if (imageData.baseImageDimensions && canvasWrapperRef.current) {
       const maxWidth = canvasWrapperRef.current.clientWidth - 48
@@ -252,69 +81,73 @@ export default function Exp1Page() {
       const scaleY = maxHeight / imageData.baseImageDimensions.height
       setScale(Math.min(scaleX, scaleY, 1))
     }
-  }, [imageData.baseImageDimensions])
+  }, [imageData.baseImageDimensions, activeTab]) // Recalculate on tab change if coming back to setup
 
-  // Canvas init + grid + set initial width state + restore canvas data
+  // Initialize Canvas and Restore Data
   useEffect(() => {
-    imageData.drawableAreas.forEach(area => {
-      const canvas = canvasRefs.current[area.id]
-      if (canvas) {
-        const needsInit = !contextRefs.current[area.id]
-        
-        if (needsInit) {
-          const initialWidth = area.scrollWidth * 3
-          canvas.width = initialWidth
+    if (activeTab === 'setup') {
+      imageData.drawableAreas.forEach(area => {
+        const canvas = canvasRefs.current[area.id]
+        if (canvas) {
+          const storedWidth = canvasWidths[area.id] || area.scrollWidth * 3
+
+          // Only resize if different to avoid flickering/clearing if not needed, 
+          // but we usually need to enforce it on mount
+          if (canvas.width !== storedWidth) {
+            canvas.width = storedWidth
+          }
+          // Use defaults if stored height 0 (shouldn't happen)
           canvas.height = area.height
+
           const ctx = canvas.getContext('2d')
           if (ctx) {
             contextRefs.current[area.id] = ctx
-            setCanvasWidths(prev => ({ ...prev, [area.id]: initialWidth }))
-          }
-        }
 
-        const ctx = contextRefs.current[area.id]
-        if (ctx) {
-          // Check if we have saved data to restore
-          const savedData = canvasData[area.id]
-          if (savedData) {
-            // Clear and restore from saved image data
-            const img = new Image()
-            img.src = savedData
-            img.onload = () => {
-              // Clear the canvas first
-              ctx.clearRect(0, 0, canvas.width, canvas.height)
-              // Draw the saved image
-              ctx.drawImage(img, 0, 0)
-            }
-          } else if (needsInit) {
-            // Draw fresh grid only on initial load if no saved data
-            ctx.fillStyle = area.color
-            ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-            ctx.strokeStyle = '#e0e0e0'
-            ctx.lineWidth = 1
-            for (let x = 0; x < canvas.width; x += 50) {
-              ctx.beginPath()
-              ctx.moveTo(x, 0)
-              ctx.lineTo(x, canvas.height)
-              ctx.stroke()
-            }
-            for (let y = 0; y < canvas.height; y += 50) {
-              ctx.beginPath()
-              ctx.moveTo(0, y)
-              ctx.lineTo(canvas.width, y)
-              ctx.stroke()
+            // Restore data
+            const savedData = canvasData[area.id]
+            if (savedData) {
+              const img = new Image()
+              img.src = savedData
+              img.onload = () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height)
+                ctx.drawImage(img, 0, 0)
+              }
+            } else {
+              // Initial Grid
+              ctx.fillStyle = area.color
+              ctx.fillRect(0, 0, canvas.width, canvas.height)
+              ctx.strokeStyle = '#e0e0e0'
+              ctx.lineWidth = 1
+              for (let x = 0; x < canvas.width; x += 50) {
+                ctx.beginPath()
+                ctx.moveTo(x, 0)
+                ctx.lineTo(x, canvas.height)
+                ctx.stroke()
+              }
+              for (let y = 0; y < canvas.height; y += 50) {
+                ctx.beginPath()
+                ctx.moveTo(0, y)
+                ctx.lineTo(canvas.width, y)
+                ctx.stroke()
+              }
             }
           }
-        }
-      }
-    })
-  }, [imageData.drawableAreas, canvasData, activeTab])
 
-  // Save canvas data when tab changes
-  useEffect(() => {
-    if (activeTab !== 'setup') {
-      const newCanvasData: Record<string, string> = {}
+          // Restore Scroll Position
+          if (drawableAreaRefs.current[area.id]) {
+            // currentGraphX might be a good approximation, or we could store scroll per area
+            // For now, restoring currentGraphX is decent if there's only one main graph or they move together
+            drawableAreaRefs.current[area.id].scrollLeft = currentGraphX * scale
+          }
+        }
+      })
+    }
+  }, [activeTab, imageData.drawableAreas, canvasData, canvasWidths, currentGraphX, scale])
+
+  const handleTabChange = (newTab: 'theory' | 'setup' | 'observation' | 'graphs') => {
+    if (activeTab === 'setup') {
+      // Save canvas data before leaving setup
+      const newCanvasData: Record<string, string> = { ...canvasData }
       imageData.drawableAreas.forEach(area => {
         const canvas = canvasRefs.current[area.id]
         if (canvas) {
@@ -323,64 +156,31 @@ export default function Exp1Page() {
       })
       setCanvasData(newCanvasData)
     }
-  }, [activeTab, imageData.drawableAreas])
-
+    setActiveTab(newTab)
+  }
 
   const rotatePoint = (x: number, y: number, centerX: number, centerY: number, angle: number) => {
     const radians = (angle * Math.PI) / 180
     const cos = Math.cos(radians)
     const sin = Math.sin(radians)
-
     const dx = x - centerX
     const dy = y - centerY
-
     return {
       x: centerX + (dx * cos - dy * sin),
       y: centerY + (dx * sin + dy * cos)
     }
   }
 
-  const drawOnCanvas = useCallback((areaId: string, x: number, y: number, lastX?: number, lastY?: number, isVertical: boolean = false) => {
-    const ctx = contextRefs.current[areaId]
-    if (!ctx) return
-    ctx.strokeStyle = isVertical ? '#0000ff' : '#ff0000'
-    ctx.lineWidth = isVertical ? 1 : 2
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    if (lastX !== undefined && lastY !== undefined) {
-      ctx.beginPath()
-      ctx.moveTo(lastX, lastY)
-      ctx.lineTo(x, y)
-      ctx.stroke()
-    } else {
-      ctx.beginPath()
-      ctx.arc(x, y, 1, 0, Math.PI * 2)
-      ctx.fill()
-    }
-  }, [])
+
 
   const calculateResponse = (baseline: number, concentration: number): number => {
     const amountAdded = 1
     const concInBath = (concentration * amountAdded) / ORGAN_BATH_VOLUME
-
     const EC50 = 0.008
     const hillCoefficient = 1.5
-
     const numerator = Math.pow(concInBath, hillCoefficient)
     const denominator = Math.pow(EC50, hillCoefficient) + Math.pow(concInBath, hillCoefficient)
     const responsePercent = 100 * (numerator / denominator)
-
-    console.log('=== DOSE-RESPONSE CALCULATION ===')
-    console.log('Stock concentration:', concentration, 'µg/mL')
-    console.log('Baseline:', baseline, 'µg/mL')
-    console.log('Amount added:', amountAdded, 'mL')
-    console.log('Bath volume:', ORGAN_BATH_VOLUME, 'mL')
-    console.log('Final conc in bath:', concInBath.toFixed(4), 'µg/mL')
-    console.log('EC50:', EC50, 'µg/mL')
-    console.log('Response %:', responsePercent.toFixed(1), '%')
-    console.log('Expected angle:', (-(responsePercent / 100) * MAX_ROTATION_ANGLE).toFixed(1), '°')
-    console.log('==================================')
-
     return responsePercent
   }
 
@@ -404,9 +204,7 @@ export default function Exp1Page() {
     const targetRotation = 0
     const duration = 1500
     const startTime = Date.now()
-    console.log('=== WASH START ===')
-    console.log('Current rotation:', startRotation.toFixed(2), '°')
-    // FIXED: Calculate pen tip position correctly
+
     const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
     const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
 
@@ -432,14 +230,20 @@ export default function Exp1Page() {
       const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
 
       setCurrentLeverRotation(currentRotation)
+      // Note: We don't need to setImageData just for rotation if we use currentLeverRotation for rendering
+      // BUT the original code updated imageData.subImages.rotation too. 
+      // We should probably keep that consistent or just rely on currentLeverRotation in render.
+      // The render loop below uses imageData, so we should update it or make render use state.
+      // Optimally, rendering should rely on state, but the structure has rotation in subImages. 
+      // Let's update it to be safe.
       setImageData(prev => ({
         ...prev,
         subImages: prev.subImages.map(img =>
           img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
         )
       }))
+
       if (progress >= 1) {
-        // Draw final vertical line from current position back to baseline
         imageData.drawableAreas?.forEach(area => {
           if (
             startPenTip.x >= area.x &&
@@ -447,21 +251,12 @@ export default function Exp1Page() {
             startPenTip.y >= area.y &&
             startPenTip.y <= area.y + area.height
           ) {
-            // Get current scroll position
             const currentScroll = drawableAreaRefs.current[area.id]?.scrollLeft / scale || 0
-
-            // Use actual pen tip world coordinates + scroll offset
             const startCanvasX = (startPenTip.x - area.x) + currentScroll
             const startCanvasY = startPenTip.y - area.y
             const endCanvasX = (baselinePenTip.x - area.x) + currentScroll
             const endCanvasY = baselinePenTip.y - area.y
-            console.log('Wash line:', {
-              startCanvasX: startCanvasX.toFixed(1),
-              startCanvasY: startCanvasY.toFixed(1),
-              endCanvasX: endCanvasX.toFixed(1),
-              endCanvasY: endCanvasY.toFixed(1),
-              currentScroll: currentScroll.toFixed(1)
-            })
+
             const ctx = contextRefs.current[area.id]
             if (ctx) {
               ctx.strokeStyle = '#0000ff'
@@ -474,54 +269,51 @@ export default function Exp1Page() {
           }
         })
         setExperimentRunning(false)
-
-        // Update currentGraphX: During wash, scroll a small distance for the vertical line
         const area = imageData.drawableAreas?.[0]
         if (area && drawableAreaRefs.current[area.id]) {
-          // Add small scroll for the wash line spacing
           const currentScroll = drawableAreaRefs.current[area.id].scrollLeft / scale
-          const newScroll = currentScroll + 15 // Small spacing after wash
+          const newScroll = currentScroll + 15
           const canvas = canvasRefs.current[area.id]
           const visibleWidth = area.width
           const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
           const clampedScroll = Math.max(0, Math.min(newScroll, maxScrollLeft))
-
           drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
           setCurrentGraphX(clampedScroll)
         }
-
-        console.log('=== WASH COMPLETE ===')
         showToast('Wash completed', 'success')
       } else {
         animationFrameRef.current = requestAnimationFrame(animate)
       }
     }
     animationFrameRef.current = requestAnimationFrame(animate)
-  }, [imageData, currentLeverRotation, currentGraphX, rotatePoint, scale, drawOnCanvas])
+  }, [imageData, currentLeverRotation, currentGraphX, scale, rotatePoint, setCurrentLeverRotation, setImageData, setExperimentRunning, setCurrentGraphX])
 
-    const expandCanvasIfNeeded = useCallback((areaId: string, requiredWidth: number) => {
-      const canvas = canvasRefs.current[areaId]
-      const ctx = contextRefs.current[areaId]
-      if (canvas && ctx && requiredWidth > canvas.width - 200) {
-        const currentImageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const newWidth = canvas.width * 2
-        canvas.width = newWidth
-        ctx.putImageData(currentImageData, 0, 0)
-  
-        const area = imageData.drawableAreas.find(a => a.id === areaId)
-        if (area) {
-          ctx.fillStyle = area.color
-          ctx.strokeStyle = '#e0e0e0'
-          ctx.lineWidth = 1
-          for (let x = 0; x < newWidth; x += 50) {
-            ctx.beginPath()
-            ctx.moveTo(x, 0)
-            ctx.lineTo(x, canvas.height)
-            ctx.stroke()
-          }
+  const expandCanvasIfNeeded = useCallback((areaId: string, requiredWidth: number) => {
+    const canvas = canvasRefs.current[areaId]
+    const ctx = contextRefs.current[areaId]
+    if (canvas && ctx && requiredWidth > canvas.width - 200) {
+      const currentImageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const newWidth = canvas.width * 2
+      canvas.width = newWidth
+      ctx.putImageData(currentImageData, 0, 0)
+
+      // Update store with new width so it persists
+      setCanvasWidths(prev => ({ ...prev, [areaId]: newWidth }))
+
+      const area = imageData.drawableAreas.find(a => a.id === areaId)
+      if (area) {
+        ctx.fillStyle = area.color
+        ctx.strokeStyle = '#e0e0e0'
+        ctx.lineWidth = 1
+        for (let x = 0; x < newWidth; x += 50) {
+          ctx.beginPath()
+          ctx.moveTo(x, 0)
+          ctx.lineTo(x, canvas.height)
+          ctx.stroke()
         }
       }
-    }, [imageData])
+    }
+  }, [imageData, setCanvasWidths])
 
   const performInjection = useCallback(async () => {
     if (!imageData.baseImage || imageData.subImages.length === 0) {
@@ -541,27 +333,21 @@ export default function Exp1Page() {
     setExperimentRunning(true)
     const responsePercent = calculateResponse(selectedBaseline, selectedConcentration)
     const targetRotation = -(responsePercent / 100) * MAX_ROTATION_ANGLE
-    console.log('=== INJECTION START ===')
-    console.log('Baseline:', selectedBaseline, 'µg/mL')
-    console.log('Concentration:', selectedConcentration, 'µg/mL')
-    console.log('Response %:', responsePercent.toFixed(2), '%')
-    console.log('Target rotation:', targetRotation.toFixed(2), '°')
+
     const startRotation = currentLeverRotation
     const duration = 3000
     const startTime = Date.now()
-    // Track last position per area for continuous lines
     const areaLastPos: Record<string, { x: number; y: number }> = {}
-
-    // For auto-scroll: track the starting scroll position
     const startScrollPositions: Record<string, number> = {}
-    const scrollDistance = 150 // How far to scroll during the injection (simulate paper movement)
+    const scrollDistance = 150
+
     const animate = () => {
       const now = Date.now()
       const elapsed = now - startTime
       const progress = Math.min(elapsed / duration, 1)
       const easeProgress = 1 / (1 + Math.exp(-8 * (progress - 0.5)))
-
       const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
+
       setCurrentLeverRotation(currentRotation)
       setImageData(prev => ({
         ...prev,
@@ -569,94 +355,47 @@ export default function Exp1Page() {
           img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
         )
       }))
-      // FIXED: Calculate pen tip position correctly (same as show page)
+
       const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
       const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
-
       const rotatedPenTip = rotatePoint(
         penTipLocalX,
         penTipLocalY,
-        leverImage.centerX,
-        leverImage.centerY,
+        leverImage.centerX!,
+        leverImage.centerY!,
         currentRotation
       )
-      // Draw on canvas - CRITICAL: Account for scroll position!
-      imageData.drawableAreas?.forEach(area => {
-        console.log('=== CHECKING DRAWABLE AREA ===')
-        console.log('Area bounds:', {
-          areaX: area.x,
-          areaY: area.y,
-          areaWidth: area.width,
-          areaHeight: area.height,
-          areaRight: area.x + area.width,
-          areaBottom: area.y + area.height
-        })
-        console.log('Pen tip position:', {
-          penTipX: rotatedPenTip.x.toFixed(1),
-          penTipY: rotatedPenTip.y.toFixed(1)
-        })
 
-        // Check if pen tip is over this drawable area
+      imageData.drawableAreas?.forEach(area => {
         const isInArea = rotatedPenTip.x >= area.x &&
           rotatedPenTip.x <= area.x + area.width &&
           rotatedPenTip.y >= area.y &&
           rotatedPenTip.y <= area.y + area.height
 
-        console.log('Is pen in area?', isInArea)
-
         if (isInArea) {
-          console.log('✅ PEN IS IN AREA - DRAWING!')
-
-          // Initialize start scroll position if not set
           if (startScrollPositions[area.id] === undefined && drawableAreaRefs.current[area.id]) {
             startScrollPositions[area.id] = drawableAreaRefs.current[area.id].scrollLeft / scale
           }
-
-          // AUTO-SCROLL: Simulate paper movement - scroll gradually during injection
           const canvas = canvasRefs.current[area.id]
           const startScroll = startScrollPositions[area.id] || 0
-
-          // Scroll distance increases with progress
           const currentScrollOffset = startScroll + (scrollDistance * progress)
 
           if (autoScroll && drawableAreaRefs.current[area.id]) {
             const visibleWidth = area.width
             const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+            // Update currentGraphX state less frequently if possible, but here we drive animation
             const clampedScroll = Math.max(0, Math.min(currentScrollOffset, maxScrollLeft))
-
             drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
-
-            console.log('Auto-scroll:', {
-              progress: (progress * 100).toFixed(1) + '%',
-              startScroll: startScroll.toFixed(1),
-              currentOffset: currentScrollOffset.toFixed(1),
-              actualScroll: clampedScroll.toFixed(1)
-            })
           }
 
-          // Check if we need to expand canvas
           const penTipRelativeX = rotatedPenTip.x - area.x
           expandCanvasIfNeeded(area.id, penTipRelativeX + currentScrollOffset + 300)
 
-          // CRITICAL FIX: Canvas coordinates must account for the scroll offset!
-          // The pen tip appears to stay in one place on screen, but we're scrolling the canvas
-          // So we need to draw at: pen position + scroll offset
           const canvasX = (rotatedPenTip.x - area.x) + currentScrollOffset
           const canvasY = rotatedPenTip.y - area.y
-          console.log('Drawing at pen tip:', {
-            progress: (progress * 100).toFixed(1) + '%',
-            penTipWorldX: rotatedPenTip.x.toFixed(1),
-            penTipWorldY: rotatedPenTip.y.toFixed(1),
-            penTipRelativeX: (rotatedPenTip.x - area.x).toFixed(1),
-            scrollOffset: currentScrollOffset.toFixed(1),
-            canvasX: canvasX.toFixed(1),
-            canvasY: canvasY.toFixed(1),
-            rotation: currentRotation.toFixed(1) + '°'
-          })
-          // Always draw line from last position to create continuous curve
+
           const lastPos = areaLastPos[area.id]
           if (lastPos) {
-            console.log('Drawing line from', lastPos, 'to', { x: canvasX, y: canvasY })
             const ctx = contextRefs.current[area.id]
             if (ctx) {
               ctx.strokeStyle = '#ff0000'
@@ -667,49 +406,23 @@ export default function Exp1Page() {
               ctx.moveTo(lastPos.x, lastPos.y)
               ctx.lineTo(canvasX, canvasY)
               ctx.stroke()
-              console.log('✅ LINE DRAWN!')
-            } else {
-              console.log('❌ NO CONTEXT!')
             }
-          } else {
-            console.log('⚠️ NO LAST POSITION - FIRST FRAME')
           }
-          // Update last position for next frame
           areaLastPos[area.id] = { x: canvasX, y: canvasY }
-        } else {
-          console.log('❌ PEN IS OUTSIDE AREA - NO DRAWING')
         }
       })
       if (progress < 1) {
         animationFrameRef.current = requestAnimationFrame(animate)
       } else {
         setExperimentRunning(false)
-
-        // Update currentGraphX to the furthest right position the pen reached
-        const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
-        if (leverImage && leverImage.penTipOffsetX !== undefined && leverImage.penTipOffsetY !== undefined) {
-          const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
-          const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
-
-          const finalPenTip = rotatePoint(
-            penTipLocalX,
-            penTipLocalY,
-            leverImage.centerX!,
-            leverImage.centerY!,
-            currentRotation
-          )
-
-          const area = imageData.drawableAreas?.[0]
-          if (area) {
-            // Record where we ended for the next operation
-            const finalScrollPos = drawableAreaRefs.current[area.id]?.scrollLeft / scale || 0
-            setCurrentGraphX(finalScrollPos + 20) // Add spacing for next injection
-          }
+        const area = imageData.drawableAreas?.[0]
+        if (area && drawableAreaRefs.current[area.id]) {
+          const finalScrollPos = drawableAreaRefs.current[area.id].scrollLeft / scale || 0
+          setCurrentGraphX(finalScrollPos + 20)
         }
 
         const amountAdded = 1
         const concInBath = (selectedConcentration * amountAdded) / ORGAN_BATH_VOLUME
-
         setObservations(prev => [...prev, {
           sNo: prev.length + 1,
           concentration: selectedConcentration,
@@ -718,76 +431,31 @@ export default function Exp1Page() {
           response: '',
           percentResponse: ''
         }])
-
-        console.log('=== INJECTION COMPLETE ===')
-        console.log('Final rotation:', currentRotation.toFixed(2), '°')
-
         showToast('Injection completed!', 'success')
       }
     }
     animationFrameRef.current = requestAnimationFrame(animate)
-  }, [imageData, currentLeverRotation, currentGraphX, selectedBaseline, selectedConcentration, autoScroll, rotatePoint, calculateResponse, expandCanvasIfNeeded, scale, drawOnCanvas])
+  }, [imageData, currentLeverRotation, selectedBaseline, selectedConcentration, autoScroll, scale, rotatePoint, expandCanvasIfNeeded, setCurrentLeverRotation, setImageData, setExperimentRunning, setObservations, setCurrentGraphX])
 
   const updateObservationResponse = (index: number, response: string) => {
     setObservations(prev => {
       const updated = [...prev]
       updated[index].response = response
-
       if (response && !isNaN(parseFloat(response)) && maxResponse > 0) {
         const responseValue = parseFloat(response)
         updated[index].percentResponse = ((responseValue / maxResponse) * 100).toFixed(2)
-
         updated.forEach((obs, i) => {
           if (obs.response && !isNaN(parseFloat(obs.response))) {
             updated[i].percentResponse = ((parseFloat(obs.response) / maxResponse) * 100).toFixed(2)
           }
         })
       }
-
       return updated
     })
   }
 
   const resetExperiment = () => {
-    setCurrentLeverRotation(0)
-    setCurrentGraphX(0)
-    setObservations([])
-
-    setImageData(prev => ({
-      ...prev,
-      subImages: prev.subImages.map(img =>
-        img.id === 'sub-1770900057664-0' ? { ...img, rotation: 0 } : img
-      )
-    }))
-
-    imageData.drawableAreas?.forEach(area => {
-      const ctx = contextRefs.current[area.id]
-      if (ctx) {
-        ctx.fillStyle = area.color
-        ctx.fillRect(0, 0, area.scrollWidth, area.height)
-
-        ctx.strokeStyle = '#e0e0e0'
-        ctx.lineWidth = 1
-        for (let x = 0; x < area.scrollWidth; x += 50) {
-          ctx.beginPath()
-          ctx.moveTo(x, 0)
-          ctx.lineTo(x, area.height)
-          ctx.stroke()
-        }
-        for (let y = 0; y < area.height; y += 50) {
-          ctx.beginPath()
-          ctx.moveTo(0, y)
-          ctx.lineTo(area.scrollWidth, y)
-          ctx.stroke()
-        }
-      }
-      if (drawableAreaRefs.current[area.id]) {
-        drawableAreaRefs.current[area.id].scrollLeft = 0
-      }
-      setCanvasWidths(prev => ({ ...prev, [area.id]: area.scrollWidth * 3 }))
-    })
-
-    localStorage.clear()
+    resetStore() // Resets state in store
     showToast('Experiment reset - ready for new trial', 'info')
   }
 
@@ -798,7 +466,6 @@ export default function Exp1Page() {
 
   // Chart data
   const sortedObs = [...observations].sort((a, b) => a.concentration - b.concentration)
-
   const doseData = {
     labels: sortedObs.map(o => o.concentration.toFixed(2)),
     datasets: [{
@@ -839,7 +506,6 @@ export default function Exp1Page() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="max-w-7xl mx-auto px-5 py-8">
-
         <div className="flex items-center justify-between mb-10">
           <div>
             <h1 className="text-3xl font-bold text-slate-800">Acetylcholine Dose-Response Curve</h1>
@@ -859,12 +525,11 @@ export default function Exp1Page() {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              className={`flex-1 py-4 px-6 font-medium flex items-center justify-center gap-2 border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? 'border-blue-600 text-blue-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}
+              onClick={() => handleTabChange(tab.id as any)}
+              className={`flex-1 py-4 px-6 font-medium flex items-center justify-center gap-2 border-b-2 transition-colors ${activeTab === tab.id
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+                }`}
             >
               <tab.icon size={18} />
               {tab.label}
@@ -875,11 +540,10 @@ export default function Exp1Page() {
         {/* Toast */}
         {toast && (
           <div className="fixed top-8 right-8 z-50 animate-in slide-in-from-top duration-300">
-            <div className={`px-6 py-4 rounded-lg shadow-2xl border-2 backdrop-blur-md ${
-              toast.type === 'success' ? 'bg-green-500/90 border-green-300 text-white' :
+            <div className={`px-6 py-4 rounded-lg shadow-2xl border-2 backdrop-blur-md ${toast.type === 'success' ? 'bg-green-500/90 border-green-300 text-white' :
               toast.type === 'error' ? 'bg-red-500/90 border-red-300 text-white' :
-              'bg-blue-500/90 border-blue-300 text-white'
-            }`}>
+                'bg-blue-500/90 border-blue-300 text-white'
+              }`}>
               <div className="flex items-center space-x-3">
                 <div className="text-2xl">
                   {toast.type === 'success' ? '✓' : toast.type === 'error' ? '✕' : 'ℹ'}
@@ -893,14 +557,12 @@ export default function Exp1Page() {
         {/* SETUP TAB */}
         {activeTab === 'setup' && (
           <div className="grid lg:grid-cols-12 gap-8">
-            {/* Canvas */}
             <div className="lg:col-span-8 bg-white rounded-xl shadow border overflow-hidden">
               <div className="p-5 border-b">
                 <h2 className="text-lg font-semibold">Kymograph</h2>
               </div>
               <div ref={canvasWrapperRef} className="p-6 bg-slate-50 min-h-[700px]">
                 <div
-                  ref={containerRef}
                   className="relative"
                   style={{
                     width: `${imageData.baseImageDimensions.width * scale}px`,
@@ -916,7 +578,6 @@ export default function Exp1Page() {
                       pointerEvents: 'none',
                     }}
                   />
-
                   {allItems.map(item => {
                     if (item.type === 'image') {
                       const img = item as SubImage
@@ -925,7 +586,6 @@ export default function Exp1Page() {
                       if (img.centerX && img.centerY) {
                         origin = `${((img.centerX - img.x) / img.width) * 100}% ${((img.centerY - img.y) / img.height) * 100}%`
                       }
-
                       const penTip = img.centerX && img.centerY && img.penTipOffsetX !== undefined && img.penTipOffsetY !== undefined
                         ? rotatePoint(img.x + img.penTipOffsetX, img.y + img.penTipOffsetY, img.centerX, img.centerY, rot)
                         : null
@@ -944,13 +604,8 @@ export default function Exp1Page() {
                               zIndex: img.zIndex,
                             }}
                           >
-                            <img
-                              src={img.url}
-                              alt=""
-                              style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
-                            />
+                            <img src={img.url} alt="" style={{ width: '100%', height: '100%', pointerEvents: 'none' }} />
                           </div>
-
                           {img.centerX && img.centerY && (
                             <div
                               className="absolute w-3 h-3 bg-red-500 rounded-full border-2 border-white pointer-events-none"
@@ -961,7 +616,6 @@ export default function Exp1Page() {
                               }}
                             />
                           )}
-
                           {penTip && (
                             <div
                               className="absolute w-4 h-4 bg-green-500 rounded-full border-2 border-white pointer-events-none"
@@ -972,7 +626,6 @@ export default function Exp1Page() {
                               }}
                             />
                           )}
-
                           {penTip && (
                             <div
                               className="absolute w-6 h-6 bg-yellow-400 rounded-full border-2 border-black pointer-events-none opacity-75"
@@ -990,9 +643,7 @@ export default function Exp1Page() {
                       return (
                         <div
                           key={area.id}
-                          ref={el => {
-                            if (el) drawableAreaRefs.current[area.id] = el
-                          }}
+                          ref={el => { if (el) drawableAreaRefs.current[area.id] = el }}
                           className="absolute overflow-x-auto overflow-y-hidden border border-slate-200 rounded"
                           style={{
                             left: `${area.x * scale}px`,
@@ -1003,9 +654,7 @@ export default function Exp1Page() {
                           }}
                         >
                           <canvas
-                            ref={el => {
-                              if (el) canvasRefs.current[area.id] = el
-                            }}
+                            ref={el => { if (el) canvasRefs.current[area.id] = el }}
                             style={{
                               width: `${(canvasWidths[area.id] || area.scrollWidth * 3) * scale}px`,
                               height: `${area.height * scale}px`,
@@ -1019,7 +668,6 @@ export default function Exp1Page() {
               </div>
             </div>
 
-            {/* Controls */}
             <div className="lg:col-span-4 space-y-6">
               <div className="bg-white rounded-xl shadow border p-6">
                 <h3 className="font-medium mb-4">Parameters</h3>
@@ -1069,9 +717,8 @@ export default function Exp1Page() {
                   <span className="text-sm text-slate-600">Auto-scroll</span>
                   <button
                     onClick={() => setAutoScroll(!autoScroll)}
-                    className={`px-4 py-1.5 rounded text-sm font-medium ${
-                      autoScroll ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
-                    }`}
+                    className={`px-4 py-1.5 rounded text-sm font-medium ${autoScroll ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'
+                      }`}
                   >
                     {autoScroll ? 'ON' : 'OFF'}
                   </button>
@@ -1120,7 +767,6 @@ export default function Exp1Page() {
         {/* OBSERVATION TAB */}
         {activeTab === 'observation' && (
           <div className="space-y-10">
-            {/* Complete Kymograph View */}
             <div className="bg-white rounded-xl shadow border p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">Kymograph Recording</h2>
@@ -1136,33 +782,32 @@ export default function Exp1Page() {
                 {imageData.drawableAreas.map(area => {
                   const displayScale = 0.8
                   const usedWidth = Math.max(currentGraphX + 100, area.scrollWidth)
-                  
+                  const storedData = canvasData[area.id]
+
                   return (
                     <div key={area.id} className="mb-4">
                       <div className="overflow-x-auto overflow-y-hidden border border-slate-200 rounded">
-                        <canvas
-                          ref={(el) => {
-                            if (el) {
-                              const sourceCanvas = canvasRefs.current[area.id]
-                              if (sourceCanvas) {
-                                el.width = sourceCanvas.width
-                                el.height = sourceCanvas.height
-                                const ctx = el.getContext('2d')
-                                if (ctx) {
-                                  ctx.drawImage(sourceCanvas, 0, 0)
-                                }
-                              }
-                            }
-                          }}
-                          style={{
-                            width: `${usedWidth * displayScale}px`,
-                            height: `${area.height * displayScale}px`,
-                            display: 'block',
-                          }}
-                        />
+                        {/* 
+                           Here we use an IMG instead of Canvas for observation if data exists, 
+                           which is much more reliable than trying to clone a canvas that might not exist 
+                        */}
+                        {storedData ? (
+                          <img
+                            src={storedData}
+                            alt="Graph Recording"
+                            style={{
+                              width: `${(canvasWidths[area.id] || area.scrollWidth * 3) * displayScale}px`,
+                              height: `${area.height * displayScale}px`,
+                              maxWidth: 'none', // Ensure it doesn't shrink
+                              display: 'block'
+                            }}
+                          />
+                        ) : (
+                          <div className="p-10 text-center text-gray-400">No graph data recorded yet</div>
+                        )}
                       </div>
                       <p className="text-xs text-gray-400 mt-2 text-center">
-                        Total graph width: {Math.round(currentGraphX)}px | Canvas: {canvasWidths[area.id] || area.scrollWidth * 3}px
+                        Total graph width: {Math.round(currentGraphX)}px
                       </p>
                     </div>
                   )
@@ -1170,8 +815,8 @@ export default function Exp1Page() {
               </div>
             </div>
 
-            {/* Table */}
             <div className="bg-white rounded-xl shadow border overflow-hidden">
+              {/* Observation Table Content - same as before */}
               <div className="p-6 border-b">
                 <h2 className="text-lg font-semibold">Observation Table</h2>
               </div>
@@ -1265,11 +910,10 @@ export default function Exp1Page() {
                 <button
                   key={sub.id}
                   onClick={() => setTheorySubTab(sub.id as any)}
-                  className={`px-6 py-2 rounded-full text-sm font-medium transition ${
-                    theorySubTab === sub.id
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
+                  className={`px-6 py-2 rounded-full text-sm font-medium transition ${theorySubTab === sub.id
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
                 >
                   {sub.label}
                 </button>
@@ -1283,7 +927,7 @@ export default function Exp1Page() {
               </div>
             )}
 
-            { theorySubTab === 'procedure' && (
+            {theorySubTab === 'procedure' && (
               <div className="prose max-w-none">
                 <h2>Procedure</h2>
                 <ol>
@@ -1300,7 +944,7 @@ export default function Exp1Page() {
               </div>
             )}
 
-            { theorySubTab === 'precautions' && (
+            {theorySubTab === 'precautions' && (
               <div className="prose max-w-none">
                 <h2>Precautions</h2>
                 <ul>
