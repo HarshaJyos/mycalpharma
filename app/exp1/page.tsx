@@ -192,10 +192,15 @@ export default function Exp1Page() {
 
 
   const calculateResponse = (baseline: number, concentration: number): number => {
-    const amountAdded = 1
-    const concInBath = (concentration * amountAdded) / ORGAN_BATH_VOLUME
-    const EC50 = 0.008
+    // Formula: Dose = Stock (baseline) * Volume (concentration)
+    // Bath Conc = Dose / Bath Volume
+    const dose = baseline * concentration
+    const concInBath = dose / ORGAN_BATH_VOLUME
+
+    // Adjusted EC50 to 0.5 based on simulation
+    const EC50 = 0.5
     const hillCoefficient = 1.5
+
     const numerator = Math.pow(concInBath, hillCoefficient)
     const denominator = Math.pow(EC50, hillCoefficient) + Math.pow(concInBath, hillCoefficient)
     const responsePercent = 100 * (numerator / denominator)
@@ -473,12 +478,12 @@ export default function Exp1Page() {
           setCurrentGraphX(finalScrollPos + 20)
         }
 
-        const amountAdded = 1
-        const concInBath = (selectedConcentration * amountAdded) / ORGAN_BATH_VOLUME
+        const quantity = selectedBaseline * selectedConcentration
+        const concInBath = quantity / ORGAN_BATH_VOLUME
         setObservations(prev => [...prev, {
           sNo: prev.length + 1,
-          concentration: selectedConcentration,
-          amountAdded,
+          concentration: selectedBaseline,
+          amountAdded: selectedConcentration,
           concInBath,
           response: '',
           percentResponse: ''
@@ -517,9 +522,9 @@ export default function Exp1Page() {
   ].sort((a, b) => a.zIndex - b.zIndex)
 
   // Chart data
-  const sortedObs = [...observations].sort((a, b) => a.concentration - b.concentration)
+  const sortedObs = [...observations].sort((a, b) => a.concInBath - b.concInBath)
   const doseData = {
-    labels: sortedObs.map(o => o.concentration.toFixed(2)),
+    labels: sortedObs.map(o => o.concInBath.toFixed(3)),
     datasets: [{
       label: '% Response',
       data: sortedObs.map(o => Number(o.percentResponse) || 0),
@@ -531,7 +536,7 @@ export default function Exp1Page() {
   }
 
   const logDoseData = {
-    labels: sortedObs.map(o => o.concentration > 0 ? Math.log10(o.concentration).toFixed(2) : '–'),
+    labels: sortedObs.map(o => o.concInBath > 0 ? Math.log10(o.concInBath).toFixed(2) : '–'),
     datasets: [{
       label: '% Response',
       data: sortedObs.map(o => Number(o.percentResponse) || 0),
@@ -725,7 +730,7 @@ export default function Exp1Page() {
                 <h3 className="font-medium mb-4">Parameters</h3>
                 <div className="space-y-5">
                   <div>
-                    <label className="block text-sm text-slate-600 mb-1.5">Baseline (µg/mL)</label>
+                    <label className="block text-sm text-slate-600 mb-1.5">Stock Concentration (µg/mL)</label>
                     <select
                       value={selectedBaseline}
                       onChange={e => setSelectedBaseline(Number(e.target.value))}
@@ -736,7 +741,7 @@ export default function Exp1Page() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm text-slate-600 mb-1.5">Concentration (µg/mL)</label>
+                    <label className="block text-sm text-slate-600 mb-1.5">Volume (mL)</label>
                     <select
                       value={selectedConcentration}
                       onChange={e => setSelectedConcentration(Number(e.target.value))}
