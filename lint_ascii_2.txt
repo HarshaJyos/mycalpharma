@@ -1,0 +1,99 @@
+
+> client@0.1.0 lint
+> eslint
+
+
+C:\Users\Harsha\Documents\Hanish\WEBSITES\mycalpharma\client\app\exp1\page.tsx
+  163:9   warning  The 'rotatePoint' function makes the dependencies of useCallback Hook (at line 460) change on every render. To fix this, wrap the definition of 'rotatePoint' in its own useCallback() Hook                                                                                              react-hooks/exhaustive-deps
+  301:6   warning  React Hook useCallback has an unnecessary dependency: 'currentGraphX'. Either exclude it or remove the dependency array                                                                                                                                                                  react-hooks/exhaustive-deps
+  550:56  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                 @typescript-eslint/no-explicit-any
+  594:19  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  629:29  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  806:25  warning  'usedWidth' is assigned a value but never used                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+  817:27  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  934:60  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                 @typescript-eslint/no-explicit-any
+  957:87  error    `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                                                                                                                                                                                                                          react/no-unescaped-entities
+  962:54  error    `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                                                                                                                                                                                                                          react/no-unescaped-entities
+
+C:\Users\Harsha\Documents\Hanish\WEBSITES\mycalpharma\client\app\layout-editor\page.tsx
+  165:41  error    Error: Cannot access variable before it is declared
+
+`handleMouseMove` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+C:\Users\Harsha\Documents\Hanish\WEBSITES\mycalpharma\client\app\layout-editor\page.tsx:165:41
+  163 |   useEffect(() => {
+  164 |     if (dragState.isDragging) {
+> 165 |       const onMove = (e: MouseEvent) => handleMouseMove(e as any)
+      |                                         ^^^^^^^^^^^^^^^ `handleMouseMove` accessed before it is declared
+  166 |       const onUp = () => handleMouseUp()
+  167 |       window.addEventListener('mousemove', onMove)
+  168 |       window.addEventListener('mouseup', onUp)
+
+C:\Users\Harsha\Documents\Hanish\WEBSITES\mycalpharma\client\app\layout-editor\page.tsx:303:3
+  301 |   }
+  302 |
+> 303 |   const handleMouseMove = (e: React.MouseEvent) => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 304 |     if (!dragState.isDragging || !containerRef.current || !baseImageDimensions) return
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 305 |
+      ???
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 342 |     }
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 343 |   }
+      | ^^^^ `handleMouseMove` is declared here
+  344 |
+  345 |   const handleMouseUp = () => {
+  346 |     setDragState({  react-hooks/immutability
+  165:62  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-explicit-any
+  166:26  error    Error: Cannot access variable before it is declared
+
+`handleMouseUp` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+C:\Users\Harsha\Documents\Hanish\WEBSITES\mycalpharma\client\app\layout-editor\page.tsx:166:26
+  164 |     if (dragState.isDragging) {
+  165 |       const onMove = (e: MouseEvent) => handleMouseMove(e as any)
+> 166 |       const onUp = () => handleMouseUp()
+      |                          ^^^^^^^^^^^^^ `handleMouseUp` accessed before it is declared
+  167 |       window.addEventListener('mousemove', onMove)
+  168 |       window.addEventListener('mouseup', onUp)
+  169 |       return () => {
+
+C:\Users\Harsha\Documents\Hanish\WEBSITES\mycalpharma\client\app\layout-editor\page.tsx:345:3
+  343 |   }
+  344 |
+> 345 |   const handleMouseUp = () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 346 |     setDragState({
+      | ^^^^^^^^^^^^^^^^^^
+> 347 |       isDragging: false,
+      ???
+      | ^^^^^^^^^^^^^^^^^^
+> 354 |     })
+      | ^^^^^^^^^^^^^^^^^^
+> 355 |   }
+      | ^^^^ `handleMouseUp` is declared here
+  356 |
+  357 |   const handleCanvasClick = (e: React.MouseEvent) => {
+  358 |     if (!containerRef.current || !selectedImage) return                                                                                                                                                                                                                                                            react-hooks/immutability
+  174:6   warning  React Hook useEffect has a missing dependency: 'handleMouseMove'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            react-hooks/exhaustive-deps
+  412:77  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-explicit-any
+  606:27  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @next/next/no-img-element
+  711:21  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @next/next/no-img-element
+  744:31  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @next/next/no-img-element
+
+C:\Users\Harsha\Documents\Hanish\WEBSITES\mycalpharma\client\app\show\page.tsx
+  126:14  warning  'err' is defined but never used                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  164:18  warning  'err' is defined but never used                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  303:62  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                 @typescript-eslint/no-explicit-any
+  312:6   warning  React Hook useEffect has a missing dependency: 'handleMouseMove'. Either include it or remove the dependency array                                                                                                                                                                       react-hooks/exhaustive-deps
+  559:25  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  610:21  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  627:29  error    'imageLeft' is never reassigned. Use 'const' instead                                                                                                                                                                                                                                     prefer-const
+  628:29  error    'imageTop' is never reassigned. Use 'const' instead                                                                                                                                                                                                                                      prefer-const
+  673:31  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+??? 27 problems (11 errors, 16 warnings)
+  2 errors and 0 warnings potentially fixable with the `--fix` option.
+

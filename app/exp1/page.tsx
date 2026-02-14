@@ -53,6 +53,23 @@ export default function Exp1Page() {
   const [scale, setScale] = useState(1)
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
 
+  // Ref to store the last pen position for continuity across animations
+  const lastPenPositionRef = useRef<Record<string, { x: number; y: number }>>({})
+
+  useEffect(() => {
+    // Inject styles to hide scrollbar but keep functionality
+    const style = document.createElement('style')
+    style.innerHTML = `
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+    `
+    document.head.appendChild(style)
+    return () => {
+      document.head.removeChild(style)
+    }
+  }, [])
+
   useEffect(() => {
     if (toast) {
       const timer = setTimeout(() => setToast(null), 3000)
@@ -91,12 +108,9 @@ export default function Exp1Page() {
         if (canvas) {
           const storedWidth = canvasWidths[area.id] || area.scrollWidth * 3
 
-          // Only resize if different to avoid flickering/clearing if not needed, 
-          // but we usually need to enforce it on mount
           if (canvas.width !== storedWidth) {
             canvas.width = storedWidth
           }
-          // Use defaults if stored height 0 (shouldn't happen)
           canvas.height = area.height
 
           const ctx = canvas.getContext('2d')
@@ -132,17 +146,21 @@ export default function Exp1Page() {
               }
             }
           }
-
-          // Restore Scroll Position
-          if (drawableAreaRefs.current[area.id]) {
-            // currentGraphX might be a good approximation, or we could store scroll per area
-            // For now, restoring currentGraphX is decent if there's only one main graph or they move together
-            drawableAreaRefs.current[area.id].scrollLeft = currentGraphX * scale
-          }
         }
       })
     }
-  }, [activeTab, imageData.drawableAreas, canvasData, canvasWidths, currentGraphX, scale])
+  }, [activeTab, imageData.drawableAreas, canvasData, canvasWidths, scale])
+
+  // Restore Scroll Position separately to avoid clearing canvas on scroll update
+  useEffect(() => {
+    if (activeTab === 'setup') {
+      imageData.drawableAreas.forEach(area => {
+        if (drawableAreaRefs.current[area.id]) {
+          drawableAreaRefs.current[area.id].scrollLeft = currentGraphX * scale
+        }
+      })
+    }
+  }, [activeTab, imageData.drawableAreas, currentGraphX, scale])
 
   const handleTabChange = (newTab: 'theory' | 'setup' | 'observation' | 'graphs') => {
     if (activeTab === 'setup') {
@@ -159,7 +177,7 @@ export default function Exp1Page() {
     setActiveTab(newTab)
   }
 
-  const rotatePoint = (x: number, y: number, centerX: number, centerY: number, angle: number) => {
+  const rotatePoint = useCallback((x: number, y: number, centerX: number, centerY: number, angle: number) => {
     const radians = (angle * Math.PI) / 180
     const cos = Math.cos(radians)
     const sin = Math.sin(radians)
@@ -169,7 +187,7 @@ export default function Exp1Page() {
       x: centerX + (dx * cos - dy * sin),
       y: centerY + (dx * sin + dy * cos)
     }
-  }
+  }, [])
 
 
 
@@ -251,9 +269,16 @@ export default function Exp1Page() {
             startPenTip.y >= area.y &&
             startPenTip.y <= area.y + area.height
           ) {
+            // Use last known pen position if available to ensure continuity
+            const lastPos = lastPenPositionRef.current[area.id]
+
             const currentScroll = drawableAreaRefs.current[area.id]?.scrollLeft / scale || 0
-            const startCanvasX = (startPenTip.x - area.x) + currentScroll
-            const startCanvasY = startPenTip.y - area.y
+
+            // If we have a last position, use it. Otherwise calculate from theoretical start.
+            // Note: lastPos is in canvas coordinates.
+            const startCanvasX = lastPos ? lastPos.x : (startPenTip.x - area.x) + currentScroll
+            const startCanvasY = lastPos ? lastPos.y : (startPenTip.y - area.y)
+
             const endCanvasX = (baselinePenTip.x - area.x) + currentScroll
             const endCanvasY = baselinePenTip.y - area.y
 
@@ -265,9 +290,23 @@ export default function Exp1Page() {
               ctx.moveTo(startCanvasX, startCanvasY)
               ctx.lineTo(endCanvasX, endCanvasY)
               ctx.stroke()
+
+              // Update last pen position to the end of wash line
+              lastPenPositionRef.current[area.id] = { x: endCanvasX, y: endCanvasY }
             }
           }
         })
+
+        // Save canvas data on wash completion
+        const canvasUpdates: Record<string, string> = {}
+        imageData.drawableAreas?.forEach(area => {
+          const canvas = canvasRefs.current[area.id]
+          if (canvas) {
+            canvasUpdates[area.id] = canvas.toDataURL()
+          }
+        })
+        setCanvasData(prev => ({ ...prev, ...canvasUpdates }))
+
         setExperimentRunning(false)
         const area = imageData.drawableAreas?.[0]
         if (area && drawableAreaRefs.current[area.id]) {
@@ -286,7 +325,7 @@ export default function Exp1Page() {
       }
     }
     animationFrameRef.current = requestAnimationFrame(animate)
-  }, [imageData, currentLeverRotation, currentGraphX, scale, rotatePoint, setCurrentLeverRotation, setImageData, setExperimentRunning, setCurrentGraphX])
+  }, [imageData, currentLeverRotation, scale, rotatePoint, setCurrentLeverRotation, setImageData, setExperimentRunning, setCurrentGraphX, setCanvasData])
 
   const expandCanvasIfNeeded = useCallback((areaId: string, requiredWidth: number) => {
     const canvas = canvasRefs.current[areaId]
@@ -337,7 +376,8 @@ export default function Exp1Page() {
     const startRotation = currentLeverRotation
     const duration = 3000
     const startTime = Date.now()
-    const areaLastPos: Record<string, { x: number; y: number }> = {}
+    // Initialize areaLastPos from the persistent ref to ensure continuity
+    const areaLastPos: Record<string, { x: number; y: number }> = { ...lastPenPositionRef.current }
     const startScrollPositions: Record<string, number> = {}
     const scrollDistance = 150
 
@@ -409,11 +449,23 @@ export default function Exp1Page() {
             }
           }
           areaLastPos[area.id] = { x: canvasX, y: canvasY }
+          // Update persistent ref
+          lastPenPositionRef.current[area.id] = { x: canvasX, y: canvasY }
         }
       })
       if (progress < 1) {
         animationFrameRef.current = requestAnimationFrame(animate)
       } else {
+        // Save canvas data BEFORE changing state that might trigger re-renders
+        const canvasUpdates: Record<string, string> = {}
+        imageData.drawableAreas?.forEach(area => {
+          const canvas = canvasRefs.current[area.id]
+          if (canvas) {
+            canvasUpdates[area.id] = canvas.toDataURL()
+          }
+        })
+        setCanvasData(prev => ({ ...prev, ...canvasUpdates }))
+
         setExperimentRunning(false)
         const area = imageData.drawableAreas?.[0]
         if (area && drawableAreaRefs.current[area.id]) {
@@ -435,7 +487,7 @@ export default function Exp1Page() {
       }
     }
     animationFrameRef.current = requestAnimationFrame(animate)
-  }, [imageData, currentLeverRotation, selectedBaseline, selectedConcentration, autoScroll, scale, rotatePoint, expandCanvasIfNeeded, setCurrentLeverRotation, setImageData, setExperimentRunning, setObservations, setCurrentGraphX])
+  }, [imageData, currentLeverRotation, selectedBaseline, selectedConcentration, autoScroll, scale, rotatePoint, expandCanvasIfNeeded, setCurrentLeverRotation, setImageData, setExperimentRunning, setObservations, setCurrentGraphX, setCanvasData])
 
   const updateObservationResponse = (index: number, response: string) => {
     setObservations(prev => {
@@ -525,7 +577,7 @@ export default function Exp1Page() {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => handleTabChange(tab.id as any)}
+              onClick={() => handleTabChange(tab.id as 'theory' | 'setup' | 'observation' | 'graphs')}
               className={`flex-1 py-4 px-6 font-medium flex items-center justify-center gap-2 border-b-2 transition-colors ${activeTab === tab.id
                 ? 'border-blue-600 text-blue-700'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -644,7 +696,7 @@ export default function Exp1Page() {
                         <div
                           key={area.id}
                           ref={el => { if (el) drawableAreaRefs.current[area.id] = el }}
-                          className="absolute overflow-x-auto overflow-y-hidden border border-slate-200 rounded"
+                          className="absolute overflow-x-auto overflow-y-hidden border border-slate-200 rounded no-scrollbar"
                           style={{
                             left: `${area.x * scale}px`,
                             top: `${area.y * scale}px`,
@@ -909,7 +961,7 @@ export default function Exp1Page() {
               ].map(sub => (
                 <button
                   key={sub.id}
-                  onClick={() => setTheorySubTab(sub.id as any)}
+                  onClick={() => setTheorySubTab(sub.id as 'introduction' | 'procedure' | 'precautions')}
                   className={`px-6 py-2 rounded-full text-sm font-medium transition ${theorySubTab === sub.id
                     ? 'bg-blue-600 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -932,12 +984,12 @@ export default function Exp1Page() {
                 <h2>Procedure</h2>
                 <ol>
                   <li>Dissect the frog and isolate the rectus abdominis muscle.</li>
-                  <li>Mount the muscle in an organ bath containing aerated frog Ringer's solution at room temperature.</li>
+                  <li>Mount the muscle in an organ bath containing aerated frog Ringer&apos;s solution at room temperature.</li>
                   <li>Attach the muscle to an isotonic lever connected to a kymograph drum.</li>
                   <li>Record a baseline contraction.</li>
                   <li>Add increasing concentrations of ACh (e.g., 0.05 to 0.8 µg/mL) to the bath.</li>
                   <li>Record the contraction height for each dose.</li>
-                  <li>Wash the bath with fresh Ringer's solution between doses to return to baseline.</li>
+                  <li>Wash the bath with fresh Ringer&apos;s solution between doses to return to baseline.</li>
                   <li>Calculate % response relative to the maximum contraction.</li>
                   <li>Plot dose-response and log-dose-response curves.</li>
                 </ol>
