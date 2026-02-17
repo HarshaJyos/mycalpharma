@@ -80,7 +80,7 @@ export const INITIAL_DATA: ImageData = {
             "height": 278.33375156838144,
             "scrollWidth": 794.8569636135508,
             "zIndex": 3,
-            "color": "#ffffff"
+            "color": "#010203"
         }
     ]
 }
