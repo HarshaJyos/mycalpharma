@@ -289,7 +289,7 @@ export default function Exp1Page() {
 
             const ctx = contextRefs.current[area.id]
             if (ctx) {
-              ctx.strokeStyle = '#0000ff'
+              ctx.strokeStyle = '#ffffff'
               ctx.lineWidth = 2
               ctx.beginPath()
               ctx.moveTo(startCanvasX, startCanvasY)
@@ -443,7 +443,7 @@ export default function Exp1Page() {
           if (lastPos) {
             const ctx = contextRefs.current[area.id]
             if (ctx) {
-              ctx.strokeStyle = '#ff0000'
+              ctx.strokeStyle = '#ffffff'
               ctx.lineWidth = 2
               ctx.lineCap = 'round'
               ctx.lineJoin = 'round'
