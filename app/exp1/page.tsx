@@ -663,7 +663,8 @@ export default function Exp1Page() {
                           >
                             <img src={img.url} alt="" style={{ width: '100%', height: '100%', pointerEvents: 'none' }} />
                           </div>
-                          {img.centerX && img.centerY && (
+                          {/* Center Point Debug Marker */}
+                          {/*{img.centerX && img.centerY && (
                             <div
                               className="absolute w-3 h-3 bg-red-500 rounded-full border-2 border-white pointer-events-none"
                               style={{
@@ -672,8 +673,9 @@ export default function Exp1Page() {
                                 zIndex: 9999,
                               }}
                             />
-                          )}
-                          {penTip && (
+                          )}*/}
+                          {/* Pen Tip Debug Marker */}
+                          {/*{penTip && (
                             <div
                               className="absolute w-4 h-4 bg-green-500 rounded-full border-2 border-white pointer-events-none"
                               style={{
@@ -682,8 +684,9 @@ export default function Exp1Page() {
                                 zIndex: 10000,
                               }}
                             />
-                          )}
-                          {penTip && (
+                          )}*/}
+                          {/* Pen Tip Highlight  */}
+                          {/*{penTip && (
                             <div
                               className="absolute w-6 h-6 bg-yellow-400 rounded-full border-2 border-black pointer-events-none opacity-75"
                               style={{
@@ -692,7 +695,7 @@ export default function Exp1Page() {
                                 zIndex: 9998,
                               }}
                             />
-                          )}
+                          )}*/}
                         </div>
                       )
                     } else {
