@@ -36,7 +36,9 @@ export default function Exp1Page() {
     maxResponse, setMaxResponse,
     canvasData, setCanvasData,
     canvasWidths, setCanvasWidths,
-    resetExperiment: resetStore
+    resetExperiment: resetStore,
+    flowStep, setFlowStep,
+    isAutoSample, setIsAutoSample
   } = useExperimentStore()
 
   const availableBaselines = [20, 50, 100, 200, 400]
@@ -80,6 +82,11 @@ export default function Exp1Page() {
   const showToast = (message: string, type: 'info' | 'success' | 'error' = 'info') => {
     setToast({ message, type })
   }
+
+  // Safety reset on mount to prevent UI lock if refreshed during animation
+  useEffect(() => {
+    setExperimentRunning(false)
+  }, [setExperimentRunning])
 
   useEffect(() => {
     return () => {
@@ -207,130 +214,134 @@ export default function Exp1Page() {
     return responsePercent
   }
 
-  const performWash = useCallback(async () => {
-    if (!imageData.baseImage || imageData.subImages.length === 0) {
-      showToast('Please load experiment data first!', 'error')
-      return
-    }
-    const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
-    if (!leverImage || leverImage.centerX === undefined || leverImage.centerY === undefined) {
-      showToast('Lever image not properly configured!', 'error')
-      return
-    }
-    if (leverImage.penTipOffsetX === undefined || leverImage.penTipOffsetY === undefined) {
-      showToast('Pen tip not set on lever image!', 'error')
-      return
-    }
-    showToast('Washing organ bath...', 'info')
-    setExperimentRunning(true)
-    const startRotation = currentLeverRotation
-    const targetRotation = 0
-    const duration = 1500
-    const startTime = Date.now()
+  const performWash = useCallback(() => {
+    return new Promise<void>((resolve) => {
+      const state = useExperimentStore.getState()
+      const { imageData, currentLeverRotation, setCurrentLeverRotation, setImageData, setCanvasData, setExperimentRunning, setFlowStep } = state // Get fresh state
 
-    const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
-    const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
-
-    const startPenTip = rotatePoint(
-      penTipLocalX,
-      penTipLocalY,
-      leverImage.centerX,
-      leverImage.centerY,
-      startRotation
-    )
-    const baselinePenTip = rotatePoint(
-      penTipLocalX,
-      penTipLocalY,
-      leverImage.centerX,
-      leverImage.centerY,
-      0
-    )
-    const animate = () => {
-      const now = Date.now()
-      const elapsed = now - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      const easeProgress = 1 - Math.exp(-5 * progress)
-      const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
-
-      setCurrentLeverRotation(currentRotation)
-      // Note: We don't need to setImageData just for rotation if we use currentLeverRotation for rendering
-      // BUT the original code updated imageData.subImages.rotation too. 
-      // We should probably keep that consistent or just rely on currentLeverRotation in render.
-      // The render loop below uses imageData, so we should update it or make render use state.
-      // Optimally, rendering should rely on state, but the structure has rotation in subImages. 
-      // Let's update it to be safe.
-      setImageData(prev => ({
-        ...prev,
-        subImages: prev.subImages.map(img =>
-          img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
-        )
-      }))
-
-      if (progress >= 1) {
-        imageData.drawableAreas?.forEach(area => {
-          if (
-            startPenTip.x >= area.x &&
-            startPenTip.x <= area.x + area.width &&
-            startPenTip.y >= area.y &&
-            startPenTip.y <= area.y + area.height
-          ) {
-            // Use last known pen position if available to ensure continuity
-            const lastPos = lastPenPositionRef.current[area.id]
-
-            const currentScroll = drawableAreaRefs.current[area.id]?.scrollLeft / scale || 0
-
-            // If we have a last position, use it. Otherwise calculate from theoretical start.
-            // Note: lastPos is in canvas coordinates.
-            const startCanvasX = lastPos ? lastPos.x : (startPenTip.x - area.x) + currentScroll
-            const startCanvasY = lastPos ? lastPos.y : (startPenTip.y - area.y)
-
-            const endCanvasX = (baselinePenTip.x - area.x) + currentScroll
-            const endCanvasY = baselinePenTip.y - area.y
-
-            const ctx = contextRefs.current[area.id]
-            if (ctx) {
-              ctx.strokeStyle = '#ffffff'
-              ctx.lineWidth = 2
-              ctx.beginPath()
-              ctx.moveTo(startCanvasX, startCanvasY)
-              ctx.lineTo(endCanvasX, endCanvasY)
-              ctx.stroke()
-
-              // Update last pen position to the end of wash line
-              lastPenPositionRef.current[area.id] = { x: endCanvasX, y: endCanvasY }
-            }
-          }
-        })
-
-        // Save canvas data on wash completion
-        const canvasUpdates: Record<string, string> = {}
-        imageData.drawableAreas?.forEach(area => {
-          const canvas = canvasRefs.current[area.id]
-          if (canvas) {
-            canvasUpdates[area.id] = canvas.toDataURL()
-          }
-        })
-        setCanvasData(prev => ({ ...prev, ...canvasUpdates }))
-
-        setExperimentRunning(false)
-        const area = imageData.drawableAreas?.[0]
-        if (area && drawableAreaRefs.current[area.id]) {
-          const currentScroll = drawableAreaRefs.current[area.id].scrollLeft / scale
-          const newScroll = currentScroll + 15
-          const canvas = canvasRefs.current[area.id]
-          const visibleWidth = area.width
-          const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
-          const clampedScroll = Math.max(0, Math.min(newScroll, maxScrollLeft))
-          drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
-          setCurrentGraphX(clampedScroll)
-        }
-        showToast('Wash completed', 'success')
-      } else {
-        animationFrameRef.current = requestAnimationFrame(animate)
+      if (!imageData.baseImage || imageData.subImages.length === 0) {
+        showToast('Please load experiment data first!', 'error')
+        resolve()
+        return
       }
-    }
-    animationFrameRef.current = requestAnimationFrame(animate)
-  }, [imageData, currentLeverRotation, scale, rotatePoint, setCurrentLeverRotation, setImageData, setExperimentRunning, setCurrentGraphX, setCanvasData])
+      const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
+      if (!leverImage || leverImage.centerX === undefined || leverImage.centerY === undefined) {
+        showToast('Lever image not properly configured!', 'error')
+        resolve()
+        return
+      }
+      if (leverImage.penTipOffsetX === undefined || leverImage.penTipOffsetY === undefined) {
+        showToast('Pen tip not set on lever image!', 'error')
+        resolve()
+        return
+      }
+      showToast('Washing organ bath...', 'info')
+      setExperimentRunning(true)
+      const startRotation = currentLeverRotation
+      const targetRotation = 0
+      const duration = 1500
+      const startTime = Date.now()
+
+      const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
+      const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
+
+      const startPenTip = rotatePoint(
+        penTipLocalX,
+        penTipLocalY,
+        leverImage.centerX,
+        leverImage.centerY,
+        startRotation
+      )
+      const baselinePenTip = rotatePoint(
+        penTipLocalX,
+        penTipLocalY,
+        leverImage.centerX,
+        leverImage.centerY,
+        0
+      )
+      const animate = () => {
+        const now = Date.now()
+        const elapsed = now - startTime
+        const progress = Math.min(elapsed / duration, 1)
+        const easeProgress = 1 - Math.exp(-5 * progress)
+        const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
+
+        setCurrentLeverRotation(currentRotation)
+        setImageData(prev => ({
+          ...prev,
+          subImages: prev.subImages.map(img =>
+            img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
+          )
+        }))
+
+        if (progress >= 1) {
+          imageData.drawableAreas?.forEach(area => {
+            if (
+              startPenTip.x >= area.x &&
+              startPenTip.x <= area.x + area.width &&
+              startPenTip.y >= area.y &&
+              startPenTip.y <= area.y + area.height
+            ) {
+              // Use last known pen position if available to ensure continuity
+              const lastPos = lastPenPositionRef.current[area.id]
+
+              const currentScroll = drawableAreaRefs.current[area.id]?.scrollLeft / scale || 0
+
+              const startCanvasX = lastPos ? lastPos.x : (startPenTip.x - area.x) + currentScroll
+              const startCanvasY = lastPos ? lastPos.y : (startPenTip.y - area.y)
+
+              // Perfect Vertical Line: End X must be exactly Start X
+              const endCanvasX = startCanvasX
+              const endCanvasY = baselinePenTip.y - area.y
+
+              const ctx = contextRefs.current[area.id]
+              if (ctx) {
+                ctx.strokeStyle = '#ffffff'
+                ctx.lineWidth = 2
+                ctx.beginPath()
+                ctx.moveTo(startCanvasX, startCanvasY)
+                ctx.lineTo(endCanvasX, endCanvasY)
+                ctx.stroke()
+
+                // Update last pen position to the end of wash line
+                lastPenPositionRef.current[area.id] = { x: endCanvasX, y: endCanvasY }
+              }
+            }
+          })
+
+          // Save canvas data on wash completion
+          const canvasUpdates: Record<string, string> = {}
+          imageData.drawableAreas?.forEach(area => {
+            const canvas = canvasRefs.current[area.id]
+            if (canvas) {
+              canvasUpdates[area.id] = canvas.toDataURL()
+            }
+          })
+          setCanvasData(prev => ({ ...prev, ...canvasUpdates }))
+
+          setExperimentRunning(false)
+          setFlowStep('BASELINE') // Ready for next cycle (Baseline)
+
+          const area = imageData.drawableAreas?.[0]
+          if (area && drawableAreaRefs.current[area.id]) {
+            const currentScroll = drawableAreaRefs.current[area.id].scrollLeft / scale
+            const newScroll = currentScroll + 15
+            const canvas = canvasRefs.current[area.id]
+            const visibleWidth = area.width
+            const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+            const clampedScroll = Math.max(0, Math.min(newScroll, maxScrollLeft))
+            drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
+            setCurrentGraphX(clampedScroll)
+          }
+          showToast('Wash completed', 'success')
+          resolve()
+        } else {
+          animationFrameRef.current = requestAnimationFrame(animate)
+        }
+      }
+      animationFrameRef.current = requestAnimationFrame(animate)
+    })
+  }, [imageData, currentLeverRotation, scale, rotatePoint, setCurrentLeverRotation, setImageData, setExperimentRunning, setCurrentGraphX, setCanvasData, setFlowStep])
 
   const expandCanvasIfNeeded = useCallback((areaId: string, requiredWidth: number) => {
     const canvas = canvasRefs.current[areaId]
@@ -359,65 +370,188 @@ export default function Exp1Page() {
     }
   }, [imageData, setCanvasWidths])
 
-  const performInjection = useCallback(async () => {
-    if (!imageData.baseImage || imageData.subImages.length === 0) {
-      showToast('Please load experiment data first!', 'error')
-      return
-    }
-    const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
-    if (!leverImage || leverImage.centerX === undefined || leverImage.centerY === undefined) {
-      showToast('Lever image not properly configured!', 'error')
-      return
-    }
-    if (leverImage.penTipOffsetX === undefined || leverImage.penTipOffsetY === undefined) {
-      showToast('Pen tip not set on lever image!', 'error')
-      return
-    }
-    showToast(`Injecting ${selectedConcentration} µg/mL ACh on ${selectedBaseline} µg/mL baseline...`, 'info')
-    setExperimentRunning(true)
-    const responsePercent = calculateResponse(selectedBaseline, selectedConcentration)
-    const targetRotation = -(responsePercent / 100) * MAX_ROTATION_ANGLE
+  const performInjection = useCallback((overrideConcentration?: number) => {
+    return new Promise<void>((resolve) => {
+      const state = useExperimentStore.getState()
+      const { imageData, currentLeverRotation, selectedBaseline, selectedConcentration, setCurrentLeverRotation, setImageData, setCanvasData, setExperimentRunning, setObservations, setFlowStep } = state // Get fresh state
 
-    const startRotation = currentLeverRotation
-    const duration = 3000
-    const startTime = Date.now()
-    // Initialize areaLastPos from the persistent ref to ensure continuity
-    const areaLastPos: Record<string, { x: number; y: number }> = { ...lastPenPositionRef.current }
-    const startScrollPositions: Record<string, number> = {}
-    const scrollDistance = 150
+      const concentrationToUse = overrideConcentration ?? selectedConcentration
 
-    const animate = () => {
-      const now = Date.now()
-      const elapsed = now - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      const easeProgress = 1 / (1 + Math.exp(-8 * (progress - 0.5)))
-      const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
+      if (!imageData.baseImage || imageData.subImages.length === 0) {
+        showToast('Please load experiment data first!', 'error')
+        resolve()
+        return
+      }
+      const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
+      if (!leverImage || leverImage.centerX === undefined || leverImage.centerY === undefined) {
+        showToast('Lever image not properly configured!', 'error')
+        resolve()
+        return
+      }
+      if (leverImage.penTipOffsetX === undefined || leverImage.penTipOffsetY === undefined) {
+        showToast('Pen tip not set on lever image!', 'error')
+        resolve()
+        return
+      }
+      showToast(`Injecting ${concentrationToUse} µg/mL ACh on ${selectedBaseline} µg/mL baseline...`, 'info')
+      setExperimentRunning(true)
+      const responsePercent = calculateResponse(selectedBaseline, concentrationToUse)
+      const targetRotation = -(responsePercent / 100) * MAX_ROTATION_ANGLE
 
-      setCurrentLeverRotation(currentRotation)
-      setImageData(prev => ({
-        ...prev,
-        subImages: prev.subImages.map(img =>
-          img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
+      const startRotation = currentLeverRotation
+      const duration = 3000
+      const startTime = Date.now()
+      // Initialize areaLastPos from the persistent ref to ensure continuity
+      const areaLastPos: Record<string, { x: number; y: number }> = { ...lastPenPositionRef.current }
+      const startScrollPositions: Record<string, number> = {}
+      const scrollDistance = 150
+
+      const animate = () => {
+        const now = Date.now()
+        const elapsed = now - startTime
+        const progress = Math.min(elapsed / duration, 1)
+        const easeProgress = 1 / (1 + Math.exp(-8 * (progress - 0.5)))
+        const currentRotation = startRotation + (targetRotation - startRotation) * easeProgress
+
+        setCurrentLeverRotation(currentRotation)
+        setImageData(prev => ({
+          ...prev,
+          subImages: prev.subImages.map(img =>
+            img.id === leverImage.id ? { ...img, rotation: currentRotation } : img
+          )
+        }))
+
+        const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
+        const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
+        const rotatedPenTip = rotatePoint(
+          penTipLocalX,
+          penTipLocalY,
+          leverImage.centerX!,
+          leverImage.centerY!,
+          currentRotation
         )
-      }))
 
-      const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
-      const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
-      const rotatedPenTip = rotatePoint(
-        penTipLocalX,
-        penTipLocalY,
-        leverImage.centerX!,
-        leverImage.centerY!,
-        currentRotation
-      )
+        imageData.drawableAreas?.forEach(area => {
+          const isInArea = rotatedPenTip.x >= area.x &&
+            rotatedPenTip.x <= area.x + area.width &&
+            rotatedPenTip.y >= area.y &&
+            rotatedPenTip.y <= area.y + area.height
 
-      imageData.drawableAreas?.forEach(area => {
-        const isInArea = rotatedPenTip.x >= area.x &&
-          rotatedPenTip.x <= area.x + area.width &&
-          rotatedPenTip.y >= area.y &&
-          rotatedPenTip.y <= area.y + area.height
+          if (isInArea) {
+            if (startScrollPositions[area.id] === undefined && drawableAreaRefs.current[area.id]) {
+              startScrollPositions[area.id] = drawableAreaRefs.current[area.id].scrollLeft / scale
+            }
+            const canvas = canvasRefs.current[area.id]
+            const startScroll = startScrollPositions[area.id] || 0
+            const currentScrollOffset = startScroll + (scrollDistance * progress)
 
-        if (isInArea) {
+            if (autoScroll && drawableAreaRefs.current[area.id]) {
+              const visibleWidth = area.width
+              const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+              // Update currentGraphX state less frequently if possible, but here we drive animation
+              const clampedScroll = Math.max(0, Math.min(currentScrollOffset, maxScrollLeft))
+              drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
+            }
+
+            const penTipRelativeX = rotatedPenTip.x - area.x
+            expandCanvasIfNeeded(area.id, penTipRelativeX + currentScrollOffset + 300)
+
+            const canvasX = (rotatedPenTip.x - area.x) + currentScrollOffset
+            const canvasY = rotatedPenTip.y - area.y
+
+            const lastPos = areaLastPos[area.id]
+            if (lastPos) {
+              const ctx = contextRefs.current[area.id]
+              if (ctx) {
+                ctx.strokeStyle = '#ffffff'
+                ctx.lineWidth = 2
+                ctx.lineCap = 'round'
+                ctx.lineJoin = 'round'
+                ctx.beginPath()
+                ctx.moveTo(lastPos.x, lastPos.y)
+                ctx.lineTo(canvasX, canvasY)
+                ctx.stroke()
+              }
+            }
+            areaLastPos[area.id] = { x: canvasX, y: canvasY }
+            // Update persistent ref
+            lastPenPositionRef.current[area.id] = { x: canvasX, y: canvasY }
+          }
+        })
+        if (progress < 1) {
+          animationFrameRef.current = requestAnimationFrame(animate)
+        } else {
+          // Save canvas data BEFORE changing state that might trigger re-renders
+          const canvasUpdates: Record<string, string> = {}
+          imageData.drawableAreas?.forEach(area => {
+            const canvas = canvasRefs.current[area.id]
+            if (canvas) {
+              canvasUpdates[area.id] = canvas.toDataURL()
+            }
+          })
+          setCanvasData(prev => ({ ...prev, ...canvasUpdates }))
+
+          setExperimentRunning(false)
+          setFlowStep('WASH') // Ready for Wash
+
+          const area = imageData.drawableAreas?.[0]
+          if (area && drawableAreaRefs.current[area.id]) {
+            const finalScrollPos = drawableAreaRefs.current[area.id].scrollLeft / scale || 0
+            setCurrentGraphX(finalScrollPos + 20)
+          }
+
+          const quantity = selectedBaseline * concentrationToUse
+          const concInBath = quantity / ORGAN_BATH_VOLUME
+          setObservations(prev => [...prev, {
+            sNo: prev.length + 1,
+            concentration: selectedBaseline,
+            amountAdded: concentrationToUse,
+            concInBath,
+            response: '',
+            percentResponse: ''
+          }])
+          showToast('Injection completed!', 'success')
+          resolve()
+        }
+      }
+      animationFrameRef.current = requestAnimationFrame(animate)
+    })
+  }, [imageData, currentLeverRotation, selectedBaseline, selectedConcentration, autoScroll, scale, rotatePoint, expandCanvasIfNeeded, setCurrentLeverRotation, setImageData, setExperimentRunning, setObservations, setCurrentGraphX, setCanvasData, setFlowStep])
+
+  const performBaseline = useCallback(() => {
+    return new Promise<void>((resolve) => {
+      const state = useExperimentStore.getState()
+      const { imageData, setCurrentLeverRotation, setCanvasData, setExperimentRunning, setFlowStep } = state // Get fresh state
+
+      if (!imageData.baseImage || imageData.subImages.length === 0) {
+        resolve()
+        return
+      }
+      const leverImage = imageData.subImages.find(img => img.id === 'sub-1770900057664-0')
+      if (!leverImage) {
+        resolve()
+        return
+      }
+
+      showToast('Recording baseline...', 'info')
+      setExperimentRunning(true)
+
+      // Ensure lever is at 0
+      setCurrentLeverRotation(0)
+
+      const duration = 2000
+      const startTime = Date.now()
+      const areaLastPos: Record<string, { x: number; y: number }> = { ...lastPenPositionRef.current }
+      const startScrollPositions: Record<string, number> = {}
+      const scrollDistance = 100 // Shorter scroll for baseline
+
+      const animate = () => {
+        const now = Date.now()
+        const elapsed = now - startTime
+        const progress = Math.min(elapsed / duration, 1)
+
+        // Only scroll, no rotation change
+        imageData.drawableAreas?.forEach(area => {
           if (startScrollPositions[area.id] === undefined && drawableAreaRefs.current[area.id]) {
             startScrollPositions[area.id] = drawableAreaRefs.current[area.id].scrollLeft / scale
           }
@@ -428,16 +562,22 @@ export default function Exp1Page() {
           if (autoScroll && drawableAreaRefs.current[area.id]) {
             const visibleWidth = area.width
             const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
-            // Update currentGraphX state less frequently if possible, but here we drive animation
             const clampedScroll = Math.max(0, Math.min(currentScrollOffset, maxScrollLeft))
             drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
+            setCurrentGraphX(clampedScroll)
           }
 
-          const penTipRelativeX = rotatedPenTip.x - area.x
+          // Draw horizontal line
+          const penTipLocalX = leverImage.x + (leverImage.penTipOffsetX || 0)
+          const penTipLocalY = leverImage.y + (leverImage.penTipOffsetY || 0)
+          // No rotation, angle 0
+          const penTip = rotatePoint(penTipLocalX, penTipLocalY, leverImage.centerX || 0, leverImage.centerY || 0, 0)
+
+          const penTipRelativeX = penTip.x - area.x
           expandCanvasIfNeeded(area.id, penTipRelativeX + currentScrollOffset + 300)
 
-          const canvasX = (rotatedPenTip.x - area.x) + currentScrollOffset
-          const canvasY = rotatedPenTip.y - area.y
+          const canvasX = (penTip.x - area.x) + currentScrollOffset
+          const canvasY = penTip.y - area.y
 
           const lastPos = areaLastPos[area.id]
           if (lastPos) {
@@ -454,45 +594,52 @@ export default function Exp1Page() {
             }
           }
           areaLastPos[area.id] = { x: canvasX, y: canvasY }
-          // Update persistent ref
           lastPenPositionRef.current[area.id] = { x: canvasX, y: canvasY }
-        }
-      })
-      if (progress < 1) {
-        animationFrameRef.current = requestAnimationFrame(animate)
-      } else {
-        // Save canvas data BEFORE changing state that might trigger re-renders
-        const canvasUpdates: Record<string, string> = {}
-        imageData.drawableAreas?.forEach(area => {
-          const canvas = canvasRefs.current[area.id]
-          if (canvas) {
-            canvasUpdates[area.id] = canvas.toDataURL()
-          }
         })
-        setCanvasData(prev => ({ ...prev, ...canvasUpdates }))
 
-        setExperimentRunning(false)
-        const area = imageData.drawableAreas?.[0]
-        if (area && drawableAreaRefs.current[area.id]) {
-          const finalScrollPos = drawableAreaRefs.current[area.id].scrollLeft / scale || 0
-          setCurrentGraphX(finalScrollPos + 20)
+        if (progress < 1) {
+          animationFrameRef.current = requestAnimationFrame(animate)
+        } else {
+          const canvasUpdates: Record<string, string> = {}
+          imageData.drawableAreas?.forEach(area => {
+            const canvas = canvasRefs.current[area.id]
+            if (canvas) canvasUpdates[area.id] = canvas.toDataURL()
+          })
+          setCanvasData(prev => ({ ...prev, ...canvasUpdates }))
+          setExperimentRunning(false)
+          setFlowStep('INJECTION')
+          showToast('Baseline recorded', 'success')
+          resolve()
         }
-
-        const quantity = selectedBaseline * selectedConcentration
-        const concInBath = quantity / ORGAN_BATH_VOLUME
-        setObservations(prev => [...prev, {
-          sNo: prev.length + 1,
-          concentration: selectedBaseline,
-          amountAdded: selectedConcentration,
-          concInBath,
-          response: '',
-          percentResponse: ''
-        }])
-        showToast('Injection completed!', 'success')
       }
-    }
-    animationFrameRef.current = requestAnimationFrame(animate)
-  }, [imageData, currentLeverRotation, selectedBaseline, selectedConcentration, autoScroll, scale, rotatePoint, expandCanvasIfNeeded, setCurrentLeverRotation, setImageData, setExperimentRunning, setObservations, setCurrentGraphX, setCanvasData])
+      animationFrameRef.current = requestAnimationFrame(animate)
+    })
+  }, [imageData, autoScroll, scale, rotatePoint, expandCanvasIfNeeded, setExperimentRunning, setCurrentGraphX, setCanvasData, setFlowStep, setCurrentLeverRotation])
+
+  const performSample = useCallback(async () => {
+    if (experimentRunning) return
+    setIsAutoSample(true)
+
+    // Pick a random concentration
+    const randomIdx = Math.floor(Math.random() * availableConcentrations.length)
+    const randomConc = availableConcentrations[randomIdx]
+    setSelectedConcentration(randomConc) // Update UI only? No, performInjection reads override.
+
+    // Sequence: Baseline -> Wait -> Inject -> Wait -> Wash
+    await performBaseline()
+
+    // Small delay
+    await new Promise(r => setTimeout(r, 800))
+
+    await performInjection(randomConc) // Pass correct value
+
+    // Delay before wash
+    await new Promise(r => setTimeout(r, 1500))
+
+    await performWash()
+
+    setIsAutoSample(false)
+  }, [experimentRunning, availableConcentrations, performBaseline, performInjection, performWash, setIsAutoSample, setSelectedConcentration])
 
   const updateObservationResponse = (index: number, response: string) => {
     setObservations(prev => {
@@ -732,44 +879,71 @@ export default function Exp1Page() {
               <div className="bg-white rounded-xl shadow border p-6">
                 <h3 className="font-medium mb-4">Parameters</h3>
                 <div className="space-y-5">
-                  <div>
-                    <label className="block text-sm text-slate-600 mb-1.5">Stock Concentration (µg/mL)</label>
-                    <select
-                      value={selectedBaseline}
-                      onChange={e => setSelectedBaseline(Number(e.target.value))}
-                      disabled={experimentRunning}
-                      className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
-                    >
-                      {availableBaselines.map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-600 mb-1.5">Volume (mL)</label>
-                    <select
-                      value={selectedConcentration}
-                      onChange={e => setSelectedConcentration(Number(e.target.value))}
-                      disabled={experimentRunning}
-                      className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
-                    >
-                      {availableConcentrations.map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
-                  </div>
+                  {/* Inputs only visible after Baseline is clicked (i.e. during INJECTION phase) or at start? 
+                      User said: "input fields only come when after the user click on base line" 
+                      So visible only when flowStep === 'INJECTION' 
+                  */}
+                  {(flowStep === 'INJECTION' || flowStep === 'BASELINE' || flowStep === 'WASH') && (
+                    <div className={`space-y-5 transition-opacity duration-300 ${flowStep === 'INJECTION' ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1.5">Stock Concentration (µg/mL)</label>
+                        <select
+                          value={selectedBaseline}
+                          onChange={e => setSelectedBaseline(Number(e.target.value))}
+                          disabled={experimentRunning || isAutoSample || flowStep !== 'INJECTION'}
+                          className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
+                        >
+                          {availableBaselines.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1.5">Volume (mL)</label>
+                        <select
+                          value={selectedConcentration}
+                          onChange={e => setSelectedConcentration(Number(e.target.value))}
+                          disabled={experimentRunning || isAutoSample || flowStep !== 'INJECTION'}
+                          className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
+                        >
+                          {availableConcentrations.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-8 grid grid-cols-2 gap-4">
                   <button
+                    onClick={performBaseline}
+                    disabled={experimentRunning || isAutoSample || flowStep !== 'BASELINE'}
+                    title="Draw a baseline on the kymograph before injection"
+                    className="py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Baseline
+                  </button>
+                  <button
+                    onClick={() => performInjection()}
+                    disabled={experimentRunning || isAutoSample || flowStep !== 'INJECTION'}
+                    title="Inject the selected concentration of drug (Available after baseline)"
+                    className="py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Inject
+                  </button>
+                  <button
                     onClick={performWash}
-                    disabled={experimentRunning}
-                    className="py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+                    disabled={experimentRunning || isAutoSample || flowStep !== 'WASH'}
+                    title="Wash the organ bath to return to baseline (Available after injection)"
+                    className="py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
                   >
                     Wash
                   </button>
+
                   <button
-                    onClick={performInjection}
-                    disabled={experimentRunning}
-                    className="py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50"
+                    onClick={performSample}
+                    disabled={experimentRunning || flowStep !== 'BASELINE'}
+                    title="Automatically run a full cycle with a random concentration"
+                    className="py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
                   >
-                    Inject
+                    Sample Test
                   </button>
                 </div>
 

@@ -28,6 +28,10 @@ interface ExperimentState {
     canvasData: Record<string, string>
     canvasWidths: Record<string, number>
 
+    // New Flow States
+    flowStep: 'BASELINE' | 'INJECTION' | 'WASH'
+    isAutoSample: boolean
+
     // Actions
     setActiveTab: (tab: 'theory' | 'setup' | 'observation' | 'graphs') => void
     setTheorySubTab: (tab: 'introduction' | 'procedure' | 'precautions') => void
@@ -43,6 +47,10 @@ interface ExperimentState {
     setCanvasData: (data: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void
     setCanvasWidths: (widths: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void
     resetExperiment: () => void
+
+    // New Actions
+    setFlowStep: (step: 'BASELINE' | 'INJECTION' | 'WASH') => void
+    setIsAutoSample: (isAuto: boolean) => void
 }
 
 export const useExperimentStore = create<ExperimentState>()(
@@ -61,6 +69,10 @@ export const useExperimentStore = create<ExperimentState>()(
             maxResponse: 100,
             canvasData: {},
             canvasWidths: {},
+
+            // Initial Flow State
+            flowStep: 'BASELINE',
+            isAutoSample: false,
 
             setActiveTab: (activeTab) => set({ activeTab }),
             setTheorySubTab: (theorySubTab) => set({ theorySubTab }),
@@ -88,8 +100,12 @@ export const useExperimentStore = create<ExperimentState>()(
                 currentGraphX: 0,
                 observations: [],
                 canvasData: {},
-                experimentRunning: false
-            })
+                experimentRunning: false,
+                flowStep: 'BASELINE',
+                isAutoSample: false
+            }),
+            setFlowStep: (flowStep) => set({ flowStep }),
+            setIsAutoSample: (isAutoSample) => set({ isAutoSample })
         }),
         {
             name: 'experiment-storage',
