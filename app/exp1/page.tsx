@@ -49,7 +49,7 @@ export default function Exp1Page() {
   const canvasRefs = useRef<Record<string, HTMLCanvasElement>>({})
   const contextRefs = useRef<Record<string, CanvasRenderingContext2D>>({})
   const drawableAreaRefs = useRef<Record<string, HTMLDivElement>>({})
-  const animationFrameRef = useRef<number>()
+  const animationFrameRef = useRef<number | null>(null)
 
   // UI Scale can remain local as it's derived from window size/layout
   const [scale, setScale] = useState(1)
@@ -113,7 +113,7 @@ export default function Exp1Page() {
       imageData.drawableAreas.forEach(area => {
         const canvas = canvasRefs.current[area.id]
         if (canvas) {
-          const storedWidth = canvasWidths[area.id] || area.scrollWidth * 3
+          const storedWidth = canvasWidths[area.id] || Math.max(area.scrollWidth * 5, 8000)
 
           if (canvas.width !== storedWidth) {
             canvas.width = storedWidth
@@ -134,10 +134,12 @@ export default function Exp1Page() {
                 ctx.drawImage(img, 0, 0)
               }
             } else {
+              delete lastPenPositionRef.current[area.id] // Reset persistent memory when canvas goes blank
+
               // Initial Grid
               ctx.fillStyle = area.color
               ctx.fillRect(0, 0, canvas.width, canvas.height)
-              ctx.strokeStyle = '#e0e0e0'
+              //ctx.strokeStyle = '#e0e0e0'
               ctx.lineWidth = 1
               for (let x = 0; x < canvas.width; x += 50) {
                 ctx.beginPath()
@@ -328,7 +330,7 @@ export default function Exp1Page() {
             const newScroll = currentScroll + 15
             const canvas = canvasRefs.current[area.id]
             const visibleWidth = area.width
-            const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+            const maxScrollLeft = (canvas?.width || Math.max(area.scrollWidth * 5, 8000)) - visibleWidth
             const clampedScroll = Math.max(0, Math.min(newScroll, maxScrollLeft))
             drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
             setCurrentGraphX(clampedScroll)
@@ -358,7 +360,7 @@ export default function Exp1Page() {
       const area = imageData.drawableAreas.find(a => a.id === areaId)
       if (area) {
         ctx.fillStyle = area.color
-        ctx.strokeStyle = '#e0e0e0'
+        //ctx.strokeStyle = '#e0e0e0'
         ctx.lineWidth = 1
         for (let x = 0; x < newWidth; x += 50) {
           ctx.beginPath()
@@ -373,7 +375,7 @@ export default function Exp1Page() {
   const performInjection = useCallback((overrideConcentration?: number) => {
     return new Promise<void>((resolve) => {
       const state = useExperimentStore.getState()
-      const { imageData, currentLeverRotation, selectedBaseline, selectedConcentration, setCurrentLeverRotation, setImageData, setCanvasData, setExperimentRunning, setObservations, setFlowStep } = state // Get fresh state
+      const { imageData, currentLeverRotation, selectedBaseline, selectedConcentration, setCurrentLeverRotation, setImageData, setCanvasData, setExperimentRunning, setObservations, setFlowStep, maxResponse, isAutoSample: freshIsAutoSample } = state // Get fresh state
 
       const concentrationToUse = overrideConcentration ?? selectedConcentration
 
@@ -405,6 +407,7 @@ export default function Exp1Page() {
       const areaLastPos: Record<string, { x: number; y: number }> = { ...lastPenPositionRef.current }
       const startScrollPositions: Record<string, number> = {}
       const scrollDistance = 150
+      const textDrawn: Record<string, boolean> = {}
 
       const animate = () => {
         const now = Date.now()
@@ -421,8 +424,8 @@ export default function Exp1Page() {
           )
         }))
 
-        const penTipLocalX = leverImage.x + leverImage.penTipOffsetX
-        const penTipLocalY = leverImage.y + leverImage.penTipOffsetY
+        const penTipLocalX = leverImage.x + leverImage.penTipOffsetX!
+        const penTipLocalY = leverImage.y + leverImage.penTipOffsetY!
         const rotatedPenTip = rotatePoint(
           penTipLocalX,
           penTipLocalY,
@@ -447,7 +450,7 @@ export default function Exp1Page() {
 
             if (autoScroll && drawableAreaRefs.current[area.id]) {
               const visibleWidth = area.width
-              const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+              const maxScrollLeft = (canvas?.width || Math.max(area.scrollWidth * 5, 8000)) - visibleWidth
               // Update currentGraphX state less frequently if possible, but here we drive animation
               const clampedScroll = Math.max(0, Math.min(currentScrollOffset, maxScrollLeft))
               drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
@@ -458,6 +461,21 @@ export default function Exp1Page() {
 
             const canvasX = (rotatedPenTip.x - area.x) + currentScrollOffset
             const canvasY = rotatedPenTip.y - area.y
+
+            if (!textDrawn[area.id]) {
+              const ctx = contextRefs.current[area.id]
+              if (ctx) {
+                ctx.font = '12px sans-serif'
+                ctx.fillStyle = '#ffffff'
+                ctx.textAlign = 'center'
+                ctx.fillText(`${selectedBaseline} ${concentrationToUse}`, canvasX + 25, canvasY + 25)
+              }
+              textDrawn[area.id] = true
+            }
+
+            if (!areaLastPos[area.id]) {
+              areaLastPos[area.id] = { x: canvasX, y: canvasY }
+            }
 
             const lastPos = areaLastPos[area.id]
             if (lastPos) {
@@ -502,13 +520,17 @@ export default function Exp1Page() {
 
           const quantity = selectedBaseline * concentrationToUse
           const concInBath = quantity / ORGAN_BATH_VOLUME
+          const respValue = (responsePercent / 100) * maxResponse
+          const isSample = freshIsAutoSample
+
           setObservations(prev => [...prev, {
             sNo: prev.length + 1,
             concentration: selectedBaseline,
             amountAdded: concentrationToUse,
             concInBath,
-            response: '',
-            percentResponse: ''
+            response: isSample ? respValue.toFixed(2) : '',
+            percentResponse: isSample ? responsePercent.toFixed(2) : '',
+            isSample
           }])
           showToast('Injection completed!', 'success')
           resolve()
@@ -539,11 +561,11 @@ export default function Exp1Page() {
       // Ensure lever is at 0
       setCurrentLeverRotation(0)
 
-      const duration = 2000
+      const duration = 1000
       const startTime = Date.now()
       const areaLastPos: Record<string, { x: number; y: number }> = { ...lastPenPositionRef.current }
       const startScrollPositions: Record<string, number> = {}
-      const scrollDistance = 100 // Shorter scroll for baseline
+      const scrollDistance = 30 // Shorter scroll for baseline
 
       const animate = () => {
         const now = Date.now()
@@ -561,7 +583,7 @@ export default function Exp1Page() {
 
           if (autoScroll && drawableAreaRefs.current[area.id]) {
             const visibleWidth = area.width
-            const maxScrollLeft = (canvas?.width || area.scrollWidth * 3) - visibleWidth
+            const maxScrollLeft = (canvas?.width || Math.max(area.scrollWidth * 5, 8000)) - visibleWidth
             const clampedScroll = Math.max(0, Math.min(currentScrollOffset, maxScrollLeft))
             drawableAreaRefs.current[area.id].scrollLeft = clampedScroll * scale
             setCurrentGraphX(clampedScroll)
@@ -578,6 +600,10 @@ export default function Exp1Page() {
 
           const canvasX = (penTip.x - area.x) + currentScrollOffset
           const canvasY = penTip.y - area.y
+
+          if (!areaLastPos[area.id]) {
+            areaLastPos[area.id] = { x: canvasX, y: canvasY }
+          }
 
           const lastPos = areaLastPos[area.id]
           if (lastPos) {
@@ -676,9 +702,11 @@ export default function Exp1Page() {
       label: '% Response',
       data: sortedObs.map(o => Number(o.percentResponse) || 0),
       borderColor: '#3b82f6',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      backgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : 'rgba(59, 130, 246, 0.1)'),
+      pointBackgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#3b82f6'),
+      pointBorderColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#3b82f6'),
       tension: 0.4,
-      pointRadius: 5,
+      pointRadius: sortedObs.map(o => o.isSample ? 7 : 5),
     }]
   }
 
@@ -688,9 +716,11 @@ export default function Exp1Page() {
       label: '% Response',
       data: sortedObs.map(o => Number(o.percentResponse) || 0),
       borderColor: '#10b981',
-      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      backgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : 'rgba(16, 185, 129, 0.1)'),
+      pointBackgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#10b981'),
+      pointBorderColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#10b981'),
       tension: 0.4,
-      pointRadius: 5,
+      pointRadius: sortedObs.map(o => o.isSample ? 7 : 5),
     }]
   }
 
@@ -863,7 +893,7 @@ export default function Exp1Page() {
                           <canvas
                             ref={el => { if (el) canvasRefs.current[area.id] = el }}
                             style={{
-                              width: `${(canvasWidths[area.id] || area.scrollWidth * 3) * scale}px`,
+                              width: `${(canvasWidths[area.id] || Math.max(area.scrollWidth * 5, 8000)) * scale}px`,
                               height: `${area.height * scale}px`,
                             }}
                           />
@@ -879,42 +909,36 @@ export default function Exp1Page() {
               <div className="bg-white rounded-xl shadow border p-6">
                 <h3 className="font-medium mb-4">Parameters</h3>
                 <div className="space-y-5">
-                  {/* Inputs only visible after Baseline is clicked (i.e. during INJECTION phase) or at start? 
-                      User said: "input fields only come when after the user click on base line" 
-                      So visible only when flowStep === 'INJECTION' 
-                  */}
-                  {(flowStep === 'INJECTION' || flowStep === 'BASELINE' || flowStep === 'WASH') && (
-                    <div className={`space-y-5 transition-opacity duration-300 ${flowStep === 'INJECTION' ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
-                      <div>
-                        <label className="block text-sm text-slate-600 mb-1.5">Stock Concentration (µg/mL)</label>
-                        <select
-                          value={selectedBaseline}
-                          onChange={e => setSelectedBaseline(Number(e.target.value))}
-                          disabled={experimentRunning || isAutoSample || flowStep !== 'INJECTION'}
-                          className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
-                        >
-                          {availableBaselines.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm text-slate-600 mb-1.5">Volume (mL)</label>
-                        <select
-                          value={selectedConcentration}
-                          onChange={e => setSelectedConcentration(Number(e.target.value))}
-                          disabled={experimentRunning || isAutoSample || flowStep !== 'INJECTION'}
-                          className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
-                        >
-                          {availableConcentrations.map(v => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      </div>
+                  <div className="space-y-5 transition-opacity duration-300 opacity-100">
+                    <div>
+                      <label className="block text-sm text-slate-600 mb-1.5">Stock Concentration (µg/mL)</label>
+                      <select
+                        value={selectedBaseline}
+                        onChange={e => setSelectedBaseline(Number(e.target.value))}
+                        disabled={experimentRunning || isAutoSample}
+                        className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
+                      >
+                        {availableBaselines.map(v => <option key={v} value={v}>{v}</option>)}
+                      </select>
                     </div>
-                  )}
+                    <div>
+                      <label className="block text-sm text-slate-600 mb-1.5">Volume (mL)</label>
+                      <select
+                        value={selectedConcentration}
+                        onChange={e => setSelectedConcentration(Number(e.target.value))}
+                        disabled={experimentRunning || isAutoSample}
+                        className="w-full border rounded-lg px-3 py-2.5 disabled:opacity-60"
+                      >
+                        {availableConcentrations.map(v => <option key={v} value={v}>{v}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="mt-8 grid grid-cols-2 gap-4">
                   <button
                     onClick={performBaseline}
-                    disabled={experimentRunning || isAutoSample || flowStep !== 'BASELINE'}
+                    disabled={experimentRunning || isAutoSample}
                     title="Draw a baseline on the kymograph before injection"
                     className="py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
                   >
@@ -922,16 +946,16 @@ export default function Exp1Page() {
                   </button>
                   <button
                     onClick={() => performInjection()}
-                    disabled={experimentRunning || isAutoSample || flowStep !== 'INJECTION'}
-                    title="Inject the selected concentration of drug (Available after baseline)"
+                    disabled={experimentRunning || isAutoSample}
+                    title="Inject the selected concentration of drug"
                     className="py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
                   >
                     Inject
                   </button>
                   <button
                     onClick={performWash}
-                    disabled={experimentRunning || isAutoSample || flowStep !== 'WASH'}
-                    title="Wash the organ bath to return to baseline (Available after injection)"
+                    disabled={experimentRunning || isAutoSample}
+                    title="Wash the organ bath to return to baseline"
                     className="py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
                   >
                     Wash
@@ -939,7 +963,7 @@ export default function Exp1Page() {
 
                   <button
                     onClick={performSample}
-                    disabled={experimentRunning || flowStep !== 'BASELINE'}
+                    disabled={experimentRunning || isAutoSample}
                     title="Automatically run a full cycle with a random concentration"
                     className="py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
                   >
@@ -1030,7 +1054,7 @@ export default function Exp1Page() {
                             src={storedData}
                             alt="Graph Recording"
                             style={{
-                              width: `${(canvasWidths[area.id] || area.scrollWidth * 3) * displayScale}px`,
+                              width: `${(canvasWidths[area.id] || Math.max(area.scrollWidth * 5, 8000)) * displayScale}px`,
                               height: `${area.height * displayScale}px`,
                               maxWidth: 'none', // Ensure it doesn't shrink
                               display: 'block'
@@ -1086,21 +1110,27 @@ export default function Exp1Page() {
                       </tr>
                     ) : (
                       observations.map((obs, i) => (
-                        <tr key={i} className="hover:bg-slate-50">
+                        <tr key={i} className={obs.isSample ? "bg-purple-50 hover:bg-purple-100" : "hover:bg-slate-50"}>
                           <td className="px-6 py-4">{obs.sNo}</td>
                           <td className="px-6 py-4">{obs.concentration.toFixed(2)}</td>
                           <td className="px-6 py-4">{obs.amountAdded.toFixed(2)}</td>
                           <td className="px-6 py-4">{obs.concInBath.toFixed(4)}</td>
                           <td className="px-6 py-3">
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={obs.response}
-                              onChange={e => updateObservationResponse(i, e.target.value)}
-                              className="w-24 px-3 py-1.5 border rounded focus:outline-none focus:border-blue-400"
-                            />
+                            {obs.isSample ? (
+                              <div className="font-medium text-purple-600 px-3 py-1.5">
+                                {obs.response}
+                              </div>
+                            ) : (
+                              <input
+                                type="number"
+                                step="0.1"
+                                value={obs.response}
+                                onChange={e => updateObservationResponse(i, e.target.value)}
+                                className="w-24 px-3 py-1.5 border rounded focus:outline-none focus:border-blue-400"
+                              />
+                            )}
                           </td>
-                          <td className="px-6 py-4 font-medium text-emerald-600">
+                          <td className={`px-6 py-4 font-medium ${obs.isSample ? 'text-purple-600' : 'text-emerald-600'}`}>
                             {obs.percentResponse || '—'}%
                           </td>
                         </tr>

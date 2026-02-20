@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { INITIAL_DATA, ImageData, ObservationRecord } from './data'
+import { INITIAL_DATA, ImageData } from './data'
 
 export type { ImageData, SubImage, DrawableArea } from './data'
 
@@ -11,6 +11,7 @@ export interface ObservationRecord {
     concInBath: number
     response: string
     percentResponse: string
+    isSample?: boolean
 }
 
 interface ExperimentState {
