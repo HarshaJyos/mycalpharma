@@ -236,7 +236,7 @@ export default function Exp1Page() {
     // This naturally produces different (but close) responses for 0.8 vs 1.6 mL
     // because the Hill curve plateaus near Emax — pharmacologically realistic.
     // e.g. at highest baselines: 0.8 mL → ~92-95%, 1.6 mL → ~97-99% (near-ceiling, not identical)
-    const EC50 = 0.5
+    const EC50 = 0.15
     const hillCoefficient = 1.5
 
     const numerator = Math.pow(concInBath, hillCoefficient)
