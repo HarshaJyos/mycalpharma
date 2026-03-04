@@ -498,7 +498,7 @@ export default function Exp1Page() {
                 ctx.font = '12px sans-serif'
                 ctx.fillStyle = '#ffffff'
                 ctx.textAlign = 'center'
-                ctx.fillText(`${selectedBaseline} ${concentrationToUse}`, canvasX + 25, canvasY + 25)
+                ctx.fillText(`${((responsePercent / 100) * maxResponse).toFixed(1)} mm`, canvasX + 25, canvasY + 25)
               }
               textDrawn[area.id] = true
             }
