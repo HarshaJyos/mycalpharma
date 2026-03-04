@@ -101,6 +101,7 @@ export const useExperimentStore = create<ExperimentState>()(
                 currentGraphX: 0,
                 observations: [],
                 canvasData: {},
+                canvasWidths: {},
                 experimentRunning: false,
                 flowStep: 'BASELINE',
                 isAutoSample: false

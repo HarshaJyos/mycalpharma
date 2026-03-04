@@ -42,7 +42,7 @@ export default function Exp1Page() {
   } = useExperimentStore()
 
   const availableBaselines = [20, 50, 100, 200, 400]
-  const availableConcentrations = [0.05, 0.1, 0.2, 0.4, 0.8]
+  const availableConcentrations = [0.05, 0.1, 0.2, 0.4, 0.8, 1.6]
 
   const canvasWrapperRef = useRef<HTMLDivElement>(null)
 
@@ -54,6 +54,9 @@ export default function Exp1Page() {
   // UI Scale can remain local as it's derived from window size/layout
   const [scale, setScale] = useState(1)
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
+
+  // Continue / Restart dialog
+  const [showContinueDialog, setShowContinueDialog] = useState(false)
 
   // Ref to store the last pen position for continuity across animations
   const lastPenPositionRef = useRef<Record<string, { x: number; y: number }>>({})
@@ -87,6 +90,29 @@ export default function Exp1Page() {
   useEffect(() => {
     setExperimentRunning(false)
   }, [setExperimentRunning])
+
+  // On mount: check if there is existing session data and ask user to continue or start fresh
+  useEffect(() => {
+    const state = useExperimentStore.getState()
+    const hasData = state.observations.length > 0 || Object.keys(state.canvasData).length > 0
+    if (hasData) {
+      setShowContinueDialog(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleContinue = () => {
+    setShowContinueDialog(false)
+  }
+
+  const handleFreshStart = () => {
+    // Clear the persisted localStorage key for this experiment only
+    try {
+      localStorage.removeItem('experiment-storage')
+    } catch { }
+    resetStore()
+    setShowContinueDialog(false)
+  }
 
   useEffect(() => {
     return () => {
@@ -206,13 +232,17 @@ export default function Exp1Page() {
     const dose = baseline * concentration
     const concInBath = dose / ORGAN_BATH_VOLUME
 
-    // Adjusted EC50 to 0.5 based on simulation
+    // Hill equation: EC50 = 0.5 µg/mL, n = 1.5
+    // This naturally produces different (but close) responses for 0.8 vs 1.6 mL
+    // because the Hill curve plateaus near Emax — pharmacologically realistic.
+    // e.g. at highest baselines: 0.8 mL → ~92-95%, 1.6 mL → ~97-99% (near-ceiling, not identical)
     const EC50 = 0.5
     const hillCoefficient = 1.5
 
     const numerator = Math.pow(concInBath, hillCoefficient)
     const denominator = Math.pow(EC50, hillCoefficient) + Math.pow(concInBath, hillCoefficient)
-    const responsePercent = 100 * (numerator / denominator)
+    // Cap at 99.5 so it never exceeds max visually, and never rounds to exactly 100
+    const responsePercent = Math.min(99.5, 100 * (numerator / denominator))
     return responsePercent
   }
 
@@ -739,6 +769,37 @@ export default function Exp1Page() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+
+      {/* Continue / Fresh Start Dialog */}
+      {showContinueDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 border border-slate-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <span className="text-blue-600 text-xl">↩</span>
+              </div>
+              <h2 className="text-xl font-bold text-slate-800">Previous Session Found</h2>
+            </div>
+            <p className="text-slate-600 mb-6">
+              You have an unfinished experiment session. Would you like to continue from where you left off, or start a fresh experiment?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleContinue}
+                className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              >
+                Continue Session
+              </button>
+              <button
+                onClick={handleFreshStart}
+                className="flex-1 py-3 border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50 transition-colors"
+              >
+                Fresh Start
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-5 py-8">
         <div className="flex items-center justify-between mb-10">
           <div>

@@ -101,6 +101,7 @@ export const useExperimentStore = create<ExperimentState>()(
                 currentGraphX: 0,
                 observations: [],
                 canvasData: {},
+                canvasWidths: {},
                 experimentRunning: false,
                 flowStep: 'BASELINE',
                 isAutoSample: false
@@ -109,7 +110,7 @@ export const useExperimentStore = create<ExperimentState>()(
             setIsAutoSample: (isAutoSample) => set({ isAutoSample })
         }),
         {
-            name: 'experiment-storage',
+            name: 'experiment-2-storage',
         }
     )
 )
