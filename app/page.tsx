@@ -10,7 +10,7 @@ export default function Home() {
         <p className="text-gray-600 mb-8 text-center">
           Position sub-images on a base image and run scientific experiments
         </p>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Link href="/layout-editor">
             <div className="bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-xl p-8 cursor-pointer transition-all transform hover:scale-105 shadow-lg">
@@ -20,7 +20,7 @@ export default function Home() {
               </p>
             </div>
           </Link>
-          
+
           <Link href="/show">
             <div className="bg-gradient-to-br from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl p-8 cursor-pointer transition-all transform hover:scale-105 shadow-lg">
               <h2 className="text-2xl font-bold mb-3">Showcase</h2>
@@ -35,6 +35,15 @@ export default function Home() {
               <h2 className="text-2xl font-bold mb-3">Experiment 1</h2>
               <p className="text-green-100">
                 Acetylcholine DRC Simulation
+              </p>
+            </div>
+          </Link>
+
+          <Link href="/exp2">
+            <div className="bg-gradient-to-br from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white rounded-xl p-8 cursor-pointer transition-all transform hover:scale-105 shadow-lg">
+              <h2 className="text-2xl font-bold mb-3">Experiment 2</h2>
+              <p className="text-teal-100">
+                PD2 Determination for Acetylcholine
               </p>
             </div>
           </Link>
