@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { Line } from 'react-chartjs-2'
 import {
@@ -722,35 +722,116 @@ export default function Exp2Page() {
         ...(imageData.drawableAreas || []).map(area => ({ ...area, type: 'area' as const }))
     ].sort((a, b) => a.zIndex - b.zIndex)
 
-    // Chart data — Log-Molar Dose vs % Response (only graph for PD2)
+    // Chart data — Exp2: Hill sigmoid best-fit on ALL data (including sample tests)
     const sortedObs = [...observations].sort((a, b) => a.concInBath - b.concInBath)
+    const validObs = sortedObs.filter(o => Number(o.percentResponse) > 0 && o.concInBath > 0)
 
-    const logMolarDoseData = {
-        labels: sortedObs.map(o => o.concInBath > 0 ? Math.log10(o.concInBath / 1e6).toFixed(2) : '–'),
-        datasets: [{
-            label: '% Response',
-            data: sortedObs.map(o => Number(o.percentResponse) || 0),
-            borderColor: '#10b981',
-            backgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : 'rgba(16, 185, 129, 0.1)'),
-            pointBackgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#10b981'),
-            pointBorderColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#10b981'),
-            tension: 0.4,
-            pointRadius: sortedObs.map(o => o.isSample ? 7 : 5),
-        }]
+    // Convert bath concentration (µg/mL) to log10(molar)
+    // MW of ACh = 181.66 g/mol; 1 µg/mL = 1 mg/L = 1e-3 g/L; molar = (1e-3/181.66) mol/L
+    const ACh_MW = 181.66
+    const toLogMolar = (c: number) => Math.log10((c * 1e-3) / ACh_MW)
+
+    const logMolarPts = validObs.map(o => ({
+        x: toLogMolar(o.concInBath),
+        y: Number(o.percentResponse),
+        isSample: !!o.isSample,
+    }))
+
+    // Hill sigmoid: y = 100 / (1 + 10^(n * (logEC50 - x)))
+    // Grid search over logEC50 and n to minimise MSE
+    const fitHillSigmoid = (pts: { x: number; y: number }[]) => {
+        if (pts.length < 2) return null
+        let bestMSE = Infinity
+        let bestLogEC50 = -6
+        let bestN = 1
+        for (let logEC50 = -10; logEC50 <= -3; logEC50 += 0.05) {
+            for (let n = 0.3; n <= 4; n += 0.1) {
+                const mse = pts.reduce((s, p) => {
+                    const pred = 100 / (1 + Math.pow(10, n * (logEC50 - p.x)))
+                    return s + (p.y - pred) ** 2
+                }, 0) / pts.length
+                if (mse < bestMSE) {
+                    bestMSE = mse
+                    bestLogEC50 = logEC50
+                    bestN = n
+                }
+            }
+        }
+        return { logEC50: bestLogEC50, n: bestN, mse: bestMSE }
     }
 
-    const chartOptions = (title: string, xLabel: string) => ({
+    const sigmoidFit = useMemo(
+        () => fitHillSigmoid(logMolarPts.map(p => ({ x: p.x, y: p.y }))),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [observations]
+    )
+    const minLogX = logMolarPts.length > 0 ? Math.min(...logMolarPts.map(p => p.x)) - 0.5 : -10
+    const maxLogX = logMolarPts.length > 0 ? Math.max(...logMolarPts.map(p => p.x)) + 0.5 : -4
+
+    const sigmoidCurve = sigmoidFit
+        ? Array.from({ length: 200 }, (_, i) => {
+            const x = minLogX + (maxLogX - minLogX) * i / 199
+            return { x, y: Math.min(110, 100 / (1 + Math.pow(10, sigmoidFit.n * (sigmoidFit.logEC50 - x)))) }
+        })
+        : []
+
+    const logMolarDoseData = {
+        datasets: [
+            {
+                label: 'Control Data',
+                data: logMolarPts.filter(p => !p.isSample).map(p => ({ x: p.x, y: p.y })),
+                showLine: false,
+                borderColor: '#10b981',
+                backgroundColor: '#10b981',
+                pointRadius: 6,
+                pointHoverRadius: 8,
+            },
+            {
+                label: 'Sample Test',
+                data: logMolarPts.filter(p => p.isSample).map(p => ({ x: p.x, y: p.y })),
+                showLine: false,
+                borderColor: '#a855f7',
+                backgroundColor: '#a855f7',
+                pointRadius: 7,
+                pointHoverRadius: 9,
+                pointStyle: 'triangle' as const,
+            },
+            {
+                label: 'Hill Sigmoid Fit',
+                data: sigmoidCurve,
+                showLine: true,
+                tension: 0.4,
+                borderColor: '#f97316',
+                backgroundColor: 'transparent',
+                pointRadius: 0,
+                borderWidth: 2.5,
+            },
+        ],
+    }
+
+    const logMolarChartOptions = {
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
             legend: { position: 'top' as const },
-            title: { display: true, text: title, font: { size: 16 } },
+            title: {
+                display: true,
+                text: 'Log-Molar Dose vs. % Response curve of Acetylcholine on Frog Rectus Abdominis Muscle',
+                font: { size: 16 },
+            },
         },
         scales: {
-            y: { min: 0, max: 110, title: { display: true, text: '% Response' } },
-            x: { title: { display: true, text: xLabel } },
+            x: {
+                type: 'linear' as const,
+                title: { display: true, text: 'Log₁₀(Molar Dose)' },
+            },
+            y: {
+                min: 0,
+                max: 110,
+                title: { display: true, text: '% Response' },
+            },
         },
-    })
+    }
 
     return (
         <div className="min-h-screen bg-slate-50">
@@ -1151,21 +1232,27 @@ export default function Exp2Page() {
                     </div>
                 )}
 
-                {/* GRAPHS TAB — PD2: Log-Molar Dose vs % Response only */}
+                {/* GRAPHS TAB — PD2: Hill Sigmoid Fit on all data */}
                 {activeTab === 'graphs' && (
                     <div className="space-y-10">
                         <div className="bg-white rounded-xl shadow border p-8">
-                            <h2 className="text-xl font-semibold mb-2">Log-Molar Dose vs % Response</h2>
+                            <h2 className="text-xl font-semibold mb-2">Log-Molar Dose vs % Response — Hill Sigmoid Fit</h2>
                             <p className="text-sm text-slate-500 mb-6">
-                                PD2 = −log₁₀(EC50 in molar). The concentration that produces 50% of maximum response is read from this curve.
+                                Hill sigmoid best-fit (minimum MSE) through all data including sample tests.
+                                PD2 = −log₁₀(EC50 in molar).
+                                {sigmoidFit && (
+                                    <span className="ml-2 text-slate-400">
+                                        Fitted: logEC50 = {sigmoidFit.logEC50.toFixed(2)},
+                                        n = {sigmoidFit.n.toFixed(2)},
+                                        PD2 = {(-sigmoidFit.logEC50).toFixed(2)},
+                                        MSE = {sigmoidFit.mse.toFixed(2)}
+                                    </span>
+                                )}
                             </p>
                             <div className="h-96">
                                 <Line
                                     data={logMolarDoseData}
-                                    options={chartOptions(
-                                        'Log-Molar Dose vs. % Response curve of Acetylcholine on Frog Rectus Abdominis Muscle',
-                                        'Log₁₀(Molar Dose)'
-                                    )}
+                                    options={logMolarChartOptions}
                                 />
                             </div>
                         </div>

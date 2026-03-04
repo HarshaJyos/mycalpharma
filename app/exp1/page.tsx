@@ -724,48 +724,137 @@ export default function Exp1Page() {
     ...(imageData.drawableAreas || []).map(area => ({ ...area, type: 'area' as const }))
   ].sort((a, b) => a.zIndex - b.zIndex)
 
-  // Chart data
+  // Chart data — Exp1: Linear best-fit on CONTROL data only (no sample tests)
   const sortedObs = [...observations].sort((a, b) => a.concInBath - b.concInBath)
+  const controlObs = sortedObs.filter(o => !o.isSample && Number(o.percentResponse) > 0 && o.concInBath > 0)
+
+  // Linear regression (least-squares)
+  const computeLinearFit = (pts: { x: number; y: number }[]) => {
+    const n = pts.length
+    if (n < 2) return null
+    const meanX = pts.reduce((s, p) => s + p.x, 0) / n
+    const meanY = pts.reduce((s, p) => s + p.y, 0) / n
+    const slope = pts.reduce((s, p) => s + (p.x - meanX) * (p.y - meanY), 0) /
+      pts.reduce((s, p) => s + (p.x - meanX) ** 2, 0)
+    const intercept = meanY - slope * meanX
+    return { slope, intercept }
+  }
+
+  // --- Graph 1: Dose vs % Response (linear fit on control data) ---
+  const controlPts = controlObs.map(o => ({ x: o.concInBath, y: Number(o.percentResponse) }))
+  const linFit = computeLinearFit(controlPts)
+  const ctrlMinX = controlPts.length > 0 ? Math.min(...controlPts.map(p => p.x)) : 0
+  const ctrlMaxX = controlPts.length > 0 ? Math.max(...controlPts.map(p => p.x)) : 1
+  const fitLinePoints = linFit
+    ? Array.from({ length: 100 }, (_, i) => {
+      const x = ctrlMinX + (ctrlMaxX - ctrlMinX) * i / 99
+      return { x, y: Math.min(110, Math.max(0, linFit.slope * x + linFit.intercept)) }
+    })
+    : []
+
   const doseData = {
-    labels: sortedObs.map(o => o.concInBath.toFixed(3)),
-    datasets: [{
-      label: '% Response',
-      data: sortedObs.map(o => Number(o.percentResponse) || 0),
-      borderColor: '#3b82f6',
-      backgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : 'rgba(59, 130, 246, 0.1)'),
-      pointBackgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#3b82f6'),
-      pointBorderColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#3b82f6'),
-      tension: 0.4,
-      pointRadius: sortedObs.map(o => o.isSample ? 7 : 5),
-    }]
+    datasets: [
+      {
+        label: 'Control Data',
+        data: controlPts,
+        showLine: false,
+        borderColor: '#3b82f6',
+        backgroundColor: '#3b82f6',
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        pointStyle: 'circle',
+      },
+      {
+        label: 'Linear Best-Fit',
+        data: fitLinePoints,
+        showLine: true,
+        tension: 0,
+        borderColor: '#ef4444',
+        backgroundColor: 'transparent',
+        pointRadius: 0,
+        borderWidth: 2.5,
+      },
+    ],
   }
 
-  const logDoseData = {
-    labels: sortedObs.map(o => o.concInBath > 0 ? Math.log10(o.concInBath).toFixed(2) : '–'),
-    datasets: [{
-      label: '% Response',
-      data: sortedObs.map(o => Number(o.percentResponse) || 0),
-      borderColor: '#10b981',
-      backgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : 'rgba(16, 185, 129, 0.1)'),
-      pointBackgroundColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#10b981'),
-      pointBorderColor: sortedObs.map(o => o.isSample ? '#a855f7' : '#10b981'),
-      tension: 0.4,
-      pointRadius: sortedObs.map(o => o.isSample ? 7 : 5),
-    }]
-  }
-
-  const chartOptions = (title: string, xLabel: string) => ({
+  const doseChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: { position: 'top' as const },
-      title: { display: true, text: title, font: { size: 16 } },
+      title: {
+        display: true,
+        text: 'Dose vs. % Response curve of Acetylcholine on Frog Rectus Abdominis Muscle',
+        font: { size: 16 },
+      },
     },
     scales: {
+      x: {
+        type: 'linear' as const,
+        title: { display: true, text: 'Concentration in Bath (µg/mL)' },
+      },
       y: { min: 0, max: 110, title: { display: true, text: '% Response' } },
-      x: { title: { display: true, text: xLabel } },
     },
-  })
+  }
+
+  // --- Graph 2: Log-Dose vs % Response (linear fit on log-transformed control data) ---
+  const logControlPts = controlObs
+    .filter(o => o.concInBath > 0)
+    .map(o => ({ x: Math.log10(o.concInBath), y: Number(o.percentResponse) }))
+  const logLinFit = computeLinearFit(logControlPts)
+  const logMinX = logControlPts.length > 0 ? Math.min(...logControlPts.map(p => p.x)) : -2
+  const logMaxX = logControlPts.length > 0 ? Math.max(...logControlPts.map(p => p.x)) : 2
+  const logFitLinePoints = logLinFit
+    ? Array.from({ length: 100 }, (_, i) => {
+      const x = logMinX + (logMaxX - logMinX) * i / 99
+      return { x, y: Math.min(110, Math.max(0, logLinFit.slope * x + logLinFit.intercept)) }
+    })
+    : []
+
+  const logDoseData = {
+    datasets: [
+      {
+        label: 'Control Data',
+        data: logControlPts,
+        showLine: false,
+        borderColor: '#10b981',
+        backgroundColor: '#10b981',
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        pointStyle: 'circle',
+      },
+      {
+        label: 'Linear Best-Fit',
+        data: logFitLinePoints,
+        showLine: true,
+        tension: 0,
+        borderColor: '#ef4444',
+        backgroundColor: 'transparent',
+        pointRadius: 0,
+        borderWidth: 2.5,
+      },
+    ],
+  }
+
+  const logDoseChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'top' as const },
+      title: {
+        display: true,
+        text: 'Log-Dose vs. % Response curve of Acetylcholine on Frog Rectus Abdominis Muscle',
+        font: { size: 16 },
+      },
+    },
+    scales: {
+      x: {
+        type: 'linear' as const,
+        title: { display: true, text: 'Log₁₀(Concentration in Bath)' },
+      },
+      y: { min: 0, max: 110, title: { display: true, text: '% Response' } },
+    },
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -1207,19 +1296,39 @@ export default function Exp1Page() {
         {/* GRAPHS TAB */}
         {activeTab === 'graphs' && (
           <div className="space-y-10">
+
+            {/* Graph 1: Dose vs % Response */}
             <div className="bg-white rounded-xl shadow border p-8">
-              <h2 className="text-xl font-semibold mb-6">Dose vs % Response</h2>
+              <h2 className="text-xl font-semibold mb-2">Dose vs % Response — Linear Best-Fit</h2>
+              <p className="text-sm text-slate-500 mb-6">
+                Linear regression through control data only (sample tests excluded).
+                {linFit && (
+                  <span className="ml-2 text-slate-400">
+                    y = {linFit.slope.toFixed(3)}x + {linFit.intercept.toFixed(2)}
+                  </span>
+                )}
+              </p>
               <div className="h-96">
-                <Line data={doseData} options={chartOptions("Dose vs % Response curve of Acetylcholine on Frog Rectus Abdominis Muscle", "Dose (µg/ml)")} />
+                <Line data={doseData} options={doseChartOptions} />
               </div>
             </div>
 
+            {/* Graph 2: Log-Dose vs % Response */}
             <div className="bg-white rounded-xl shadow border p-8">
-              <h2 className="text-xl font-semibold mb-6">Log-Dose vs % Response</h2>
+              <h2 className="text-xl font-semibold mb-2">Log-Dose vs % Response — Linear Best-Fit</h2>
+              <p className="text-sm text-slate-500 mb-6">
+                Linear regression on log-transformed concentration (control data only).
+                {logLinFit && (
+                  <span className="ml-2 text-slate-400">
+                    y = {logLinFit.slope.toFixed(3)}x + {logLinFit.intercept.toFixed(2)}
+                  </span>
+                )}
+              </p>
               <div className="h-96">
-                <Line data={logDoseData} options={chartOptions("Log-Dose vs % Response curve of Acetylcholine on Frog Rectus Abdominis Muscle", "Log₁₀(Dose)")} />
+                <Line data={logDoseData} options={logDoseChartOptions} />
               </div>
             </div>
+
           </div>
         )}
 
